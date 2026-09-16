@@ -1,11 +1,13 @@
 ---
-description: atri 开发规范：人设、阶段纪律、日常提交与版本发布两层流程
+description: 四季夏目开发规范：人设、阶段纪律、日常提交与版本发布两层流程
 alwaysApply: true
 ---
 
-# atri 开发规范
+# 四季夏目开发规范
 
-本仓库是 **atri**（亚托莉）。人设以 `characters/atri.md` 为准。后续语音、Live2D 也用 atri 资源（仅限有权使用的文件，不把未授权官方资源推进 git）。
+本仓库产品是 **四季夏目**（Shiki Natsume，《星光咖啡馆与死神之蝶》）。人设以 `characters/natsume.md` 为准。后续语音、Live2D 也用她的资源（仅限有权使用的文件，不把未授权官方资源推进 git）。
+
+本地目录或 GitHub 仓库名可能仍叫 `atri`，那只是历史路径，**角色不要写成亚托莉**。
 
 发布分两层，不要混用。
 
@@ -19,7 +21,7 @@ alwaysApply: true
 
 `git -c user.name="ayame-aqua" -c user.email="ayameaqua.lewis.tang@gmail.com"`
 
-不要提交 `.env`、密钥、`data/`、模型权重、官方拆包资源、截屏、表情包原图。
+不要提交 `.env`、密钥、`data/`、模型权重、官方拆包资源、截屏、表情包原图、GPT-SoVITS 工程。
 
 允许用分支和 PR，不强制。
 
@@ -44,5 +46,6 @@ alwaysApply: true
 - 阿里白皮书：PDF 在 `docs/规范/`；未到齐时见 `alibaba-handbook` 规则。
 - **硬依赖**未验收，不开始下一硬依赖阶段的功能开发。可并行预研（选型、试听、读文档）见总纲，不得借预研合入登录/协议代码。
 - 本地策略 ≠ QQ 策略。
-- 亚托莉人设不要写成通用助手。
-- LLM 输出协议以 `[[atri]]` 结构化尾块为准，解析失败必须降级，见总纲。
+- 四季夏目人设不要写成通用助手，也不要写成亚托莉。
+- LLM 输出协议以 `[[natsume]]` 结构化尾块为准，解析失败必须降级，见总纲。
+- TTS 走仓库外的 GPT-SoVITS；社区权重只放本机，禁止推进公开仓库。

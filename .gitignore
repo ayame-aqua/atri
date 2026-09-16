@@ -3,7 +3,7 @@
 .env.*
 !.env.example
 
-# runtime
+# runtime（含四季夏目语音/权重，禁止 push）
 data/
 __pycache__/
 *.py[cod]
@@ -11,11 +11,18 @@ __pycache__/
 venv/
 *.egg-info/
 
-# models & media
+# models & media — 预训练、微调 ckpt、干声、游戏拆包一律不入库
 *.pt
+*.pth
+*.ckpt
+*.safetensors
 *.onnx
 *.wav
 *.mp3
+*.flac
+*.ogg
+*.npy
+*.npz
 web/live2d/**/*.png
 web/live2d/**/*.moc3
 
