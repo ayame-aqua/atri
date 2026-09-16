@@ -21,7 +21,7 @@ alwaysApply: true
 2. **禁止** `git config` 改用户信息。提交时用：
    `git -c user.name="ayame-aqua" -c user.email="ayameaqua.lewis.tang@gmail.com"`
 3. 提交信息写清为什么改（1–2 句，英文或中文均可）。
-4. 在 `main` 上打 **新的 annotated tag**：上一版本是 `v0.4` 则本次 `v0.5`，只增不改旧 tag。
+4. 在 `main` 上打 **新的 annotated tag**：`git tag --sort=v:refname` 看最新 `v0.x`，小版本 +1（只增不改旧 tag）。
 5. `git push origin main` 以及 `git push origin <新tag>`。
 6. 推送后等 GitHub Actions CI（`.github/workflows/ci.yml`）。失败则修，再出新版本，不要把红的 CI 留给仓库。
 
