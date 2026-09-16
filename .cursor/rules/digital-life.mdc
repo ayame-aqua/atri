@@ -1,0 +1,38 @@
+---
+description: Digital Life 开发总规范：Python、每次改动必须出 git 版本并跑 CI 推送
+alwaysApply: true
+---
+
+# Digital Life 开发规范
+
+本仓库是 Digital Life。改代码或文档时必须同时遵守下面三条，以及 `docs/开发计划/`。
+
+## 1. 语言
+
+- 后端、脚本、Agent、工具链一律 **Python 3.11+**。
+- 不要用 Node/Java/Go 另起后端。Web 前端可以是静态 HTML/JS。
+- 新依赖写进 `requirements.txt`（或后续的 `pyproject.toml`），不要随手全局安装当交付。
+
+## 2. 每次改动都要出 git 版本、跑 CI、推送
+
+完成一轮会改文件的工作后，**不要等用户再说一遍 commit**：
+
+1. `git status` / `git diff` / `git log` 看清楚再提交。
+2. **禁止** `git config` 改用户信息。提交时用：
+   `git -c user.name="ayame-aqua" -c user.email="ayameaqua.lewis.tang@gmail.com"`
+3. 提交信息写清为什么改（1–2 句，英文或中文均可）。
+4. 在 `main` 上打 **新的 annotated tag**：上一版本是 `v0.4` 则本次 `v0.5`，只增不改旧 tag。
+5. `git push origin main` 以及 `git push origin <新tag>`。
+6. 推送后等 GitHub Actions CI（`.github/workflows/ci.yml`）。失败则修，再出新版本，不要把红的 CI 留给仓库。
+
+不要提交 `.env`、密钥、`data/`、模型、截屏、表情包原图。
+
+## 3. 阿里巴巴程序员白皮书
+
+- 编码风格、命名、异常、日志、分层、安全按阿里巴巴程序员白皮书执行。
+- PDF 放到 `docs/规范/` 后，**先读再写代码**；本条在白皮书入库前先按该手册里与语言无关的条款做 Python 等价落实（见 `alibaba-handbook` 规则）。
+
+## 范围提醒
+
+- 未验收当前 P 阶段，不擅自做下一 P 的功能。
+- 本地陪伴策略 ≠ QQ 社交策略，不要写混。

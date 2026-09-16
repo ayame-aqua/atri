@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Ruff
+        run: |
+          if [ -d src ]; then
+            ruff check src
+            ruff format --check src
+          else
+            echo "src/ not present yet; skip lint"
+          fi
+
+      - name: Compile
+        run: |
+          if [ -d src ]; then
+            python -m compileall -q src
+          else
+            python -m compileall -q .
+          fi
