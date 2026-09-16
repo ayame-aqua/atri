@@ -1,0 +1,30 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# runtime
+data/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# models & media
+*.pt
+*.onnx
+*.wav
+*.mp3
+web/live2d/**/*.png
+web/live2d/**/*.moc3
+
+# os / ide
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# logs
+*.log
