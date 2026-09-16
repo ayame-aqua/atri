@@ -6,13 +6,15 @@ alwaysApply: false
 
 # Python
 
-- 版本：3.11+。格式化与静态检查与 CI 保持一致（Ruff：lint + format）。
+- 版本：3.11+。依赖用 `pyproject.toml` + 锁文件；格式化、静态检查、测试与 CI 保持一致（Ruff：lint + format；pytest）。
 - 4 空格缩进；类型注解用在公开函数和跨模块接口上。
 - 包结构跟 `docs/开发计划/开发文档.md`：`src/core`、`src/channels`、`src/memory`、`src/speech`。
 - 人设文件：`characters/atri.md`。
 - 不要 `from x import *`；不要裸 `except:`；捕获后要记日志或向上抛出自定义错误。
 - 配置走 `config.yaml` + `.env`，密钥不写进源码。
 - Channel 只翻译消息，不在 `channels/` 里直接调 LLM。
+- LLM 可见输出与 `[[atri]]` 尾块的解析放在 `core/protocol.py`（或同等模块），解析失败按总纲降级，不要在 Channel 里拆。
+- 公开函数和跨模块接口要有类型注解；P1 起为协议解析、去重、错误码补单元测试。
 - 同步/异步：IO（LLM、网络、QQ）用 async；不要在已有事件循环里 `time.sleep` 堵死。
 
 ```python

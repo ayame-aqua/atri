@@ -1,41 +1,48 @@
 ---
-description: atri 每次操作的固定流程：带版本号开发文档 → 改代码 → git 版本 → CI → push
+description: atri 开发规范：人设、阶段纪律、日常提交与版本发布两层流程
 alwaysApply: true
 ---
 
 # atri 开发规范
 
-本仓库是 **atri**（亚托莉）。用户让你改任何东西时，**整轮按下面顺序做完**，不要只改文件就停，也不要等用户再说「提交」。
+本仓库是 **atri**（亚托莉）。人设以 `characters/atri.md` 为准。后续语音、Live2D 也用 atri 资源（仅限有权使用的文件，不把未授权官方资源推进 git）。
 
-人设以 `characters/atri.md` 为准。后续语音、Live2D 也用 atri 资源（仅限有权使用的文件，不把未授权官方资源推进 git）。
+发布分两层，不要混用。
 
-## 每次更改的流程（强制）
+## 日常小改动
 
-1. **算版本号**  
-   `git tag --sort=v:refname` 取最新 `v0.x`，小版本 +1。只增不改旧 tag。
+改代码或文档即可，**不必写版本记录、不必打 tag、不必等 CI 当门槛**。
 
-2. **先写带版本号的开发文档**  
-   新建 `docs/开发计划/变更/<版本>.md`。写清：版本、要做什么、改哪些文件、为什么。  
-   若本次改的是计划本身，再同步 `docs/开发计划/开发文档.md` 和相关 P 文档。  
-   总纲里的「版本」字段改成**本轮版本号**。
+提交和推送走界面即可（Source Control 里 commit + push）。用户要求你代为提交时，也可以 `git commit` 并 `git push`，仍然 **不打 tag、不写 `docs/开发计划/变更/v0.x.md`、不改总纲版本号**。
 
-3. **再改代码 / 其它文件**  
-   后端一律 **Python 3.11+**。没有代码可改（纯文档）则跳过本步，但第 2 步不能省。
+**禁止** `git config`。代为提交时用：
 
-4. **生成新的 git 版本**  
-   `git status` / `diff` / `log` 看完再提交。  
-   **禁止** `git config`。提交用：  
-   `git -c user.name="ayame-aqua" -c user.email="ayameaqua.lewis.tang@gmail.com"`  
-   然后 `git tag -a <版本> -m "..."`。
-
-5. **push 并跑 CI**  
-   `git push origin main` 且 `git push origin <版本>`。  
-   等 `.github/workflows/ci.yml`。红了就修，再出**新版本**。
+`git -c user.name="ayame-aqua" -c user.email="ayameaqua.lewis.tang@gmail.com"`
 
 不要提交 `.env`、密钥、`data/`、模型权重、官方拆包资源、截屏、表情包原图。
+
+允许用分支和 PR，不强制。
+
+## 阶段交付 / 明确功能完成 / 准备发布
+
+仅在下面情况才版本化：
+
+1. 完成一个明确功能或可交付阶段（该 P 验收通过，或用户宣布本阶段交付）
+2. 准备对外发布，或用户明确要求打版本
+
+那时才按下面做完：
+
+1. `git tag --sort=v:refname` 取最新 `v0.x`，小版本 +1。只增不改旧 tag。
+2. 新建 `docs/开发计划/变更/<版本>.md`。写清版本、做了什么、改哪些文件、为什么。总纲里的「版本」字段改成本轮版本号。
+3. 后端一律 **Python 3.11+**。
+4. `git status` / `diff` / `log` 看完再提交（同样禁止 `git config`，作者信息同上）。
+5. `git tag -a <版本> -m "..."`。
+6. `git push origin main` 且 `git push origin <版本>`。等 `.github/workflows/ci.yml`。红了就修；需要再发一版时出**新版本**，不要改旧 tag。
 
 ## 其它
 
 - 阿里白皮书：PDF 在 `docs/规范/`；未到齐时见 `alibaba-handbook` 规则。
-- 未验收当前 P，不擅自做下一 P。本地策略 ≠ QQ 策略。
+- **硬依赖**未验收，不开始下一硬依赖阶段的功能开发。可并行预研（选型、试听、读文档）见总纲，不得借预研合入登录/协议代码。
+- 本地策略 ≠ QQ 策略。
 - 亚托莉人设不要写成通用助手。
+- LLM 输出协议以 `[[atri]]` 结构化尾块为准，解析失败必须降级，见总纲。

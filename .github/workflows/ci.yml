@@ -17,8 +17,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Ruff
-        run: pip install ruff
+      - name: Install tools
+        run: pip install ruff pytest
 
       - name: Ruff
         run: |
@@ -27,6 +27,14 @@ jobs:
             ruff format --check src
           else
             echo "src/ not present yet; skip lint"
+          fi
+
+      - name: Tests
+        run: |
+          if [ -d tests ]; then
+            pytest
+          else
+            echo "tests/ not present yet; skip pytest"
           fi
 
       - name: Compile
