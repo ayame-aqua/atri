@@ -1,0 +1,141 @@
+# P4 — Live2D 口型与表情
+
+| 项 | 内容 |
+| --- | --- |
+| 阶段 | P4 |
+| 依赖 | P1–P3 验收通过 |
+| 下一阶段 | [P5-QQ通道.md](./P5-QQ通道.md) |
+| 总纲 | [开发文档.md](./开发文档.md) |
+| 本阶段目标 | 聊天页里出现皮套；说话时嘴动；emotion 切表情。桌宠连续陪伴、主动搭话、看屏幕放到 P7。 |
+
+---
+
+## 1. 本阶段要做成什么样
+
+页面一侧（或背景）渲染 Live2D。TTS 播放时嘴巴张合跟音频走；`happy/sad/angry/shy/neutral` 切到对应表情。点模型可先不做或只做最简单的点击动作。
+
+### 1.1 要做
+
+- Cubism 3–5 模型放到 `web/live2d/<model_name>/`
+- `model_dict` 或 `live2d.yaml`：路径、缩放、`emotionMap`
+- 口型：用播放中的音频 RMS 驱动 `ParamMouthOpenY`（够用就先 RMS，不必 viseme 引擎）
+- 表情：Agent 的 `emotion` → 表情文件或参数组
+- idle 呼吸 / 眨眼：用模型自带动画或简单循环
+- 无模型时降级：只聊天，不报崩
+
+### 1.2 明确不做
+
+- 透明窗口桌宠、置顶、点击穿透（P7）
+- VTube Studio 强绑定（可并列研究，但不作为 P4 交付）
+- 高精度 viseme、身体物理到直播级
+- 版权不明的游戏拆包模型上线到任何公开环境（自用也只用你有权使用的模型）
+
+---
+
+## 2. 架构
+
+```
+Agent Outbound.emotion ----------+
+                                 v
+TTS audio url  --> <audio> --> AnalyserNode RMS --> MouthOpen
+                                 v
+                         Live2D Runtime（Web）
+```
+
+口型在**前端**做，后端不必算 viseme（P4）。若以后要更准，再在 TTS 侧出音素时间轴。
+
+---
+
+## 3. 模型与配置
+
+`web/live2d/model_dict.json` 示例：
+
+```json
+[
+  {
+    "name": "default",
+    "url": "/live2d/default/model.model3.json",
+    "kScale": 0.4,
+    "emotionMap": {
+      "neutral": "idle",
+      "happy": "smile",
+      "sad": "sad",
+      "angry": "angry",
+      "shy": "blush"
+    }
+  }
+]
+```
+
+`config.yaml`：
+
+```yaml
+live2d:
+  enabled: true
+  model_name: default
+  mouth_param: ParamMouthOpenY
+  mouth_smooth: 0.35
+```
+
+模型资源通过 FastAPI `StaticFiles` 挂到 `/live2d`。
+
+**表情缺失：** 映射不到就回 `neutral`，打一条警告日志，不中断语音。
+
+---
+
+## 4. 口型算法（P4 最低）
+
+1. `AudioContext.createMediaElementSource(audio)` + `AnalyserNode`
+2. 每帧取频域或时域振幅，归一化到 0–1
+3. 指数平滑后写入嘴巴参数
+4. `ended` 时嘴巴归零，表情可在 1–2 秒后回到 idle（不要瞬间脸僵）
+
+注意浏览器自动播放策略：TTS 播放须由用户手势链触发（P3 点过录音/发送即可）。首次进入可点「启用声音与形象」。
+
+---
+
+## 5. 前端布局
+
+- 左：Live2D canvas（透明底）
+- 右：聊天记录（P1 已有）
+- 窗口变窄时：皮套缩小，聊天优先
+
+本阶段可以仍是浏览器页，不必 Electron。
+
+---
+
+## 6. 与 Agent 的约定
+
+P1 已规定 emotion 枚举。P4 不改枚举，只消费。
+
+若模型表情名不同，只改 `emotionMap`，不改 Agent。
+
+可选：人设里加「动作」标签（P7 再做点头等）。P4 只做脸。
+
+---
+
+## 7. 实现顺序
+
+1. 静态托管一份可授权的示例模型，能 idle 渲染
+2. 接 `emotion` 切表情（可先用按钮假数据）
+3. 接 P3 `<audio>` RMS 口型
+4. 无模型 / 加载失败降级
+5. 缩放与简单布局
+
+---
+
+## 8. 验收
+
+- [ ] 打开聊天页能看到 Live2D（或明确的「未配置模型」占位）
+- [ ] 播放 TTS 时嘴巴随音量张合，静音时闭合
+- [ ] 至少 4 种 emotion 能看出差别
+- [ ] 连续对话表情会变，不会卡死在上一次
+- [ ] 去掉模型文件后聊天和语音仍可用
+- [ ] 未出现桌宠窗、系统托盘、全局置顶
+
+---
+
+## 9. 交给 P5 / P7 的接口
+
+- P5：QQ 不驱动这张皮套也没关系；Core 仍然产出 emotion + texts。网页开着时 QQ 消息若将来回流到同一 Agent，皮套可跟着动（P5 不做强制）。
+- P7：桌宠复用同一套模型配置与 emotionMap；主动搭话 / CV / 打断都挂在这张脸上，停播时嘴巴立刻闭合。
