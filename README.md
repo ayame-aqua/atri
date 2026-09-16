@@ -11,7 +11,7 @@
 [![CI: Passing](https://img.shields.io/github/actions/workflow/status/ayame-aqua/atri/ci.yml?branch=main&label=CI)](https://github.com/ayame-aqua/atri/actions)
 [![Latest Tag](https://img.shields.io/github/v/tag/ayame-aqua/atri?label=release&color=cyan)](https://github.com/ayame-aqua/atri/tags)
 
-[项目总纲](docs/开发计划/开发文档.md) • [双模式机制](docs/开发计划/双模式说明.md) • [路线图 (P1–P7)](docs/开发计划/开发文档.md#3-开发顺序已确认) • [版本记录](docs/开发计划/变更/README.md)
+[项目总纲](docs/开发计划/开发文档.md) • [双模式机制](docs/开发计划/双模式说明.md) • [路线图 (P1–P7)](docs/开发计划/开发文档.md#3-开发顺序已确认) • [版本记录](docs/变更/README.md)
 
 </div>
 
@@ -127,7 +127,7 @@ P2-B（向量检索、风格库、群导出导入）是记忆补强，**不挡�
 - 📝 **各阶段实施指南**：
   - [P1 网页文字与人设](docs/开发计划/P1-网页文字聊天与人设.md) • [P2 长期记忆](docs/开发计划/P2-长期记忆.md) • [P3 语音听和说](docs/开发计划/P3-语音听和说.md)
   - [P4 Live2D口型表情](docs/开发计划/P4-Live2D口型与表情.md) • [P5 QQ通道与表情包](docs/开发计划/P5-QQ通道.md) • [P6 个人微信通道](docs/开发计划/P6-微信通道.md) • [P7 桌宠与看屏打断](docs/开发计划/P7-打断情绪与桌宠.md)
-- 📜 **版本演进档案**：[`docs/开发计划/变更/`](docs/开发计划/变更/README.md)
+- 📜 **版本演进档案**：[`docs/变更/`](docs/变更/README.md)
 
 ---
 

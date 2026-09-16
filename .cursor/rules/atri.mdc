@@ -13,7 +13,7 @@ alwaysApply: true
 
 改代码或文档即可，**不必写版本记录、不必打 tag、不必等 CI 当门槛**。
 
-提交和推送走界面即可（Source Control 里 commit + push）。用户要求你代为提交时，也可以 `git commit` 并 `git push`，仍然 **不打 tag、不写 `docs/开发计划/变更/v0.x.md`、不改总纲版本号**。
+提交和推送走界面即可（Source Control 里 commit + push）。用户要求你代为提交时，也可以 `git commit` 并 `git push`，仍然 **不打 tag、不写 `docs/变更/v0.x.md`、不改总纲版本号**。
 
 **禁止** `git config`。代为提交时用：
 
@@ -33,7 +33,7 @@ alwaysApply: true
 那时才按下面做完：
 
 1. `git tag --sort=v:refname` 取最新 `v0.x`，小版本 +1。只增不改旧 tag。
-2. 新建 `docs/开发计划/变更/<版本>.md`。写清版本、做了什么、改哪些文件、为什么。总纲里的「版本」字段改成本轮版本号。
+2. 新建 `docs/变更/<版本>.md`。写清版本、做了什么、改哪些文件、为什么。总纲里的「版本」字段改成本轮版本号。
 3. 后端一律 **Python 3.11+**。
 4. `git status` / `diff` / `log` 看完再提交（同样禁止 `git config`，作者信息同上）。
 5. `git tag -a <版本> -m "..."`。
