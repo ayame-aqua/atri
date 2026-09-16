@@ -1,38 +1,38 @@
 ---
-description: Digital Life 开发总规范：Python、每次改动必须出 git 版本并跑 CI 推送
+description: Digital Life 每次操作的固定流程：带版本号开发文档 → 改代码 → git 版本 → CI → push
 alwaysApply: true
 ---
 
 # Digital Life 开发规范
 
-本仓库是 Digital Life。改代码或文档时必须同时遵守下面三条，以及 `docs/开发计划/`。
+本仓库是 Digital Life。用户让你改任何东西时，**整轮按下面顺序做完**，不要只改文件就停，也不要等用户再说「提交」。
 
-## 1. 语言
+## 每次更改的流程（强制）
 
-- 后端、脚本、Agent、工具链一律 **Python 3.11+**。
-- 不要用 Node/Java/Go 另起后端。Web 前端可以是静态 HTML/JS。
-- 新依赖写进 `requirements.txt`（或后续的 `pyproject.toml`），不要随手全局安装当交付。
+1. **算版本号**  
+   `git tag --sort=v:refname` 取最新 `v0.x`，小版本 +1（例如 `v0.6` → `v0.7`）。只增不改旧 tag。
 
-## 2. 每次改动都要出 git 版本、跑 CI、推送
+2. **先写带版本号的开发文档**  
+   新建 `docs/开发计划/变更/<版本>.md`（文件名必须带版本号，如 `v0.7.md`）。写清：版本、要做什么、改哪些文件、为什么。  
+   若本次改的是计划本身，再同步 `docs/开发计划/开发文档.md` 和相关 P 文档。  
+   总纲里的「版本」字段改成**本轮版本号**。
 
-完成一轮会改文件的工作后，**不要等用户再说一遍 commit**：
+3. **再改代码 / 其它文件**  
+   后端一律 **Python 3.11+**。没有代码可改（纯文档）则跳过本步，但第 2 步不能省。
 
-1. `git status` / `git diff` / `git log` 看清楚再提交。
-2. **禁止** `git config` 改用户信息。提交时用：
-   `git -c user.name="ayame-aqua" -c user.email="ayameaqua.lewis.tang@gmail.com"`
-3. 提交信息写清为什么改（1–2 句，英文或中文均可）。
-4. 在 `main` 上打 **新的 annotated tag**：`git tag --sort=v:refname` 看最新 `v0.x`，小版本 +1（只增不改旧 tag）。
-5. `git push origin main` 以及 `git push origin <新tag>`。
-6. 推送后等 GitHub Actions CI（`.github/workflows/ci.yml`）。失败则修，再出新版本，不要把红的 CI 留给仓库。
+4. **生成新的 git 版本**  
+   `git status` / `diff` / `log` 看完再提交。  
+   **禁止** `git config`。提交用：  
+   `git -c user.name="ayame-aqua" -c user.email="ayameaqua.lewis.tang@gmail.com"`  
+   然后 `git tag -a <版本> -m "..."`。
+
+5. **push 并跑 CI**  
+   `git push origin main` 且 `git push origin <版本>`。  
+   等 `.github/workflows/ci.yml`。红了就修，再出**新版本**，不要把失败 CI 留在最新 tag 上。
 
 不要提交 `.env`、密钥、`data/`、模型、截屏、表情包原图。
 
-## 3. 阿里巴巴程序员白皮书
+## 其它
 
-- 编码风格、命名、异常、日志、分层、安全按阿里巴巴程序员白皮书执行。
-- PDF 放到 `docs/规范/` 后，**先读再写代码**；本条在白皮书入库前先按该手册里与语言无关的条款做 Python 等价落实（见 `alibaba-handbook` 规则）。
-
-## 范围提醒
-
-- 未验收当前 P 阶段，不擅自做下一 P 的功能。
-- 本地陪伴策略 ≠ QQ 社交策略，不要写混。
+- 阿里白皮书：PDF 在 `docs/规范/`；未到齐时见 `alibaba-handbook` 规则。
+- 未验收当前 P，不擅自做下一 P。本地策略 ≠ QQ 策略。
