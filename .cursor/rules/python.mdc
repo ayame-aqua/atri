@@ -1,5 +1,5 @@
 ---
-description: Python 实现约定（Digital Life）
+description: Python 实现约定（atri）
 globs: "**/*.py"
 alwaysApply: false
 ---
@@ -9,6 +9,7 @@ alwaysApply: false
 - 版本：3.11+。格式化与静态检查与 CI 保持一致（Ruff：lint + format）。
 - 4 空格缩进；类型注解用在公开函数和跨模块接口上。
 - 包结构跟 `docs/开发计划/开发文档.md`：`src/core`、`src/channels`、`src/memory`、`src/speech`。
+- 人设文件：`characters/atri.md`。
 - 不要 `from x import *`；不要裸 `except:`；捕获后要记日志或向上抛出自定义错误。
 - 配置走 `config.yaml` + `.env`，密钥不写进源码。
 - Channel 只翻译消息，不在 `channels/` 里直接调 LLM。

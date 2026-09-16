@@ -1,19 +1,21 @@
 ---
-description: Digital Life 每次操作的固定流程：带版本号开发文档 → 改代码 → git 版本 → CI → push
+description: atri 每次操作的固定流程：带版本号开发文档 → 改代码 → git 版本 → CI → push
 alwaysApply: true
 ---
 
-# Digital Life 开发规范
+# atri 开发规范
 
-本仓库是 Digital Life。用户让你改任何东西时，**整轮按下面顺序做完**，不要只改文件就停，也不要等用户再说「提交」。
+本仓库是 **atri**（亚托莉）。用户让你改任何东西时，**整轮按下面顺序做完**，不要只改文件就停，也不要等用户再说「提交」。
+
+人设以 `characters/atri.md` 为准。后续语音、Live2D 也用 atri 资源（仅限有权使用的文件，不把未授权官方资源推进 git）。
 
 ## 每次更改的流程（强制）
 
 1. **算版本号**  
-   `git tag --sort=v:refname` 取最新 `v0.x`，小版本 +1（例如 `v0.6` → `v0.7`）。只增不改旧 tag。
+   `git tag --sort=v:refname` 取最新 `v0.x`，小版本 +1。只增不改旧 tag。
 
 2. **先写带版本号的开发文档**  
-   新建 `docs/开发计划/变更/<版本>.md`（文件名必须带版本号，如 `v0.7.md`）。写清：版本、要做什么、改哪些文件、为什么。  
+   新建 `docs/开发计划/变更/<版本>.md`。写清：版本、要做什么、改哪些文件、为什么。  
    若本次改的是计划本身，再同步 `docs/开发计划/开发文档.md` 和相关 P 文档。  
    总纲里的「版本」字段改成**本轮版本号**。
 
@@ -28,11 +30,12 @@ alwaysApply: true
 
 5. **push 并跑 CI**  
    `git push origin main` 且 `git push origin <版本>`。  
-   等 `.github/workflows/ci.yml`。红了就修，再出**新版本**，不要把失败 CI 留在最新 tag 上。
+   等 `.github/workflows/ci.yml`。红了就修，再出**新版本**。
 
-不要提交 `.env`、密钥、`data/`、模型、截屏、表情包原图。
+不要提交 `.env`、密钥、`data/`、模型权重、官方拆包资源、截屏、表情包原图。
 
 ## 其它
 
 - 阿里白皮书：PDF 在 `docs/规范/`；未到齐时见 `alibaba-handbook` 规则。
 - 未验收当前 P，不擅自做下一 P。本地策略 ≠ QQ 策略。
+- 亚托莉人设不要写成通用助手。

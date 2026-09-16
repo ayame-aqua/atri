@@ -4,7 +4,7 @@
 | --- | --- |
 | 阶段 | P4 |
 | 首次版本 | v0.2 |
-| 最近修订 | v0.3 |
+| 最近修订 | v0.8 |
 | 变更记录 | [变更/](./变更/) |
 | 依赖 | P1–P3 验收通过 |
 | 下一阶段 | [P5-QQ通道.md](./P5-QQ通道.md) |
@@ -19,7 +19,7 @@
 
 ### 1.1 要做
 
-- Cubism 3–5 模型放到 `web/live2d/<model_name>/`
+- Cubism 3–5 的 **atri** 模型放到 `web/live2d/atri/`（仅限有权使用的文件）
 - `model_dict` 或 `live2d.yaml`：路径、缩放、`emotionMap`
 - 口型：用播放中的音频 RMS 驱动 `ParamMouthOpenY`（够用就先 RMS，不必 viseme 引擎）
 - 表情：Agent 的 `emotion` → 表情文件或参数组
@@ -56,8 +56,8 @@ TTS audio url  --> <audio> --> AnalyserNode RMS --> MouthOpen
 ```json
 [
   {
-    "name": "default",
-    "url": "/live2d/default/model.model3.json",
+    "name": "atri",
+    "url": "/live2d/atri/model.model3.json",
     "kScale": 0.4,
     "emotionMap": {
       "neutral": "idle",
@@ -75,7 +75,7 @@ TTS audio url  --> <audio> --> AnalyserNode RMS --> MouthOpen
 ```yaml
 live2d:
   enabled: true
-  model_name: default
+  model_name: atri
   mouth_param: ParamMouthOpenY
   mouth_smooth: 0.35
 ```
