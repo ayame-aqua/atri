@@ -7,7 +7,7 @@ alwaysApply: true
 
 本仓库产品是 **四季夏目**（Shiki Natsume，《星光咖啡馆与死神之蝶》）。人设以 `characters/natsume.md` 为准。后续语音、Live2D 也用她的资源（仅限有权使用的文件，不把未授权官方资源推进 git）。
 
-本地目录或 GitHub 仓库名可能仍叫 `atri`，那只是历史路径，**角色不要写成亚托莉**。
+GitHub 仓库与本地目录名为 `shiki-natsume`。**角色不要写成亚托莉。**
 
 发布分两层，不要混用。
 
