@@ -109,7 +109,7 @@
 
 - **核心语言**：全栈统一 **Python 3.11+**（FastAPI / Uvicorn / Asyncio）。
 - **模型驱动**：标准 OpenAI 兼容协议（可无缝切换 DeepSeek、Qwen、Claude 或本地 Ollama）。
-- **音频体系**：ASR（Faster-Whisper / SenseVoice）+ TTS（**GPT-SoVITS**，音色锁定四季夏目；引擎与权重不进公开仓库）。
+- **音频体系**：ASR（Faster-Whisper / SenseVoice）+ TTS（**GPT-SoVITS**，本机用自备日语干声微调四季夏目；引擎与权重不进公开仓库）。
 - **视觉感知**：Windows 本地前台窗口分析 + 轻量级多模态视觉描述（仅本机处理，严守隐私）。
 - **代码规范**：贯彻阿里巴巴代码规范精神，严格禁止魔法值、杜绝吞异常、接口健壮自洽。
 
