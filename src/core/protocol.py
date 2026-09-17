@@ -1,4 +1,7 @@
-"""解析 LLM 输出中的 [[natsume]] 尾块；失败必须降级。"""
+"""解析 LLM 输出中的 [[natsume]] 尾块；失败必须降级。
+
+标记之前的可见正文是日语台词。中文气泡由翻译步骤生成，不在本模块。
+"""
 
 from __future__ import annotations
 

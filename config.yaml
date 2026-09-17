@@ -16,7 +16,7 @@ llm:
   timeout_s: 60
 
 speech:
-  # P3：本机 GPT-SoVITS；权重与干声在 data/natsume/，不进 git
+  # P3：本机已有 GPT-SoVITS；权重不在本仓库
   tts_api_base: http://127.0.0.1:9880
   tts_text_lang: ja
   asr_model: faster-whisper-small

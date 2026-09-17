@@ -10,6 +10,7 @@ class Turn:
     role: str
     text: str
     emotion: str | None = None
+    speech_ja: str | None = None
 
 
 @dataclass

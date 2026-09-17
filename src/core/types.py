@@ -37,6 +37,7 @@ class OutboundMessage:
     reply_to_id: str
     chat_id: str
     texts: list[str] = field(default_factory=list)
+    speech_ja: str | None = None
     emotion: Emotion = "neutral"
     audio_url: str | None = None
     visemes: Any | None = None
