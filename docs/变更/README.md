@@ -24,3 +24,5 @@
 | [v0.18](./v0.18.md) | 社区参考 wav 可作推理 prompt；下载脚本；补齐缺失变更索引 |
 | [v0.19](./v0.19.md) | 工程骨架：pyproject / uv.lock / src 占位 / 协议与去重单测 / CI 跑 pytest |
 | [v0.20](./v0.20.md) | 总纲收口：四季夏目；LLM 日语 + 翻译/SoVITS 并行；权重外置；facts 表对齐 P2-A |
+| [v0.21](./v0.21.md) | P1 网页聊天接通：Agent / WS / 日→中气泡；pytest 21 项 |
+| [v0.22](./v0.22.md) | 人设文档两轮加厚：内核、推拉逻辑树、禁区（`characters/natsume.md`） |
