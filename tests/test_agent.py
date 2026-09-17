@@ -1,4 +1,4 @@
-"""Agent：日语台词译成中文气泡（假 LLM）。"""
+"""Agent：中文台词译成日语备 TTS（假 LLM）。"""
 
 from __future__ import annotations
 
@@ -41,8 +41,8 @@ def _inbound(message_id: str, text: str) -> InboundMessage:
 def test_agent_returns_chinese_bubble_and_japanese_speech() -> None:
     llm = FakeLLM(
         [
-            '風、うるさい。\n\n[[natsume]]\n{"emotion":"shy","silent":false,"memory_candidates":[]}',
-            "今晚风有点大。",
+            '四季夏目。就这些。\n\n[[natsume]]\n{"emotion":"shy","silent":false,"memory_candidates":[]}',
+            "ナツメだけど",
         ]
     )
     agent = Agent(
@@ -52,8 +52,12 @@ def test_agent_returns_chinese_bubble_and_japanese_speech() -> None:
         memory=MemoryStore(),
     )
     outbound = asyncio.run(agent.run(_inbound("m1", "外面好吵")))
-    assert outbound.speech_ja == "風、うるさい。"
-    assert outbound.texts == ["今晚风有点大。"]
+    first_prompt = llm.calls[0]
+    assert first_prompt[-2]["role"] == "user"
+    assert first_prompt[-1]["role"] == "system"
+    assert "实际" in first_prompt[-1]["content"]
+    assert outbound.speech_ja == "ナツメだけど"
+    assert outbound.texts == ["四季夏目，就这些"]
     assert outbound.emotion == "shy"
     assert outbound.silent is False
     assert "[[natsume]]" not in outbound.texts[0]
@@ -63,10 +67,10 @@ def test_agent_returns_chinese_bubble_and_japanese_speech() -> None:
 def test_agent_keeps_history_for_next_turn() -> None:
     llm = FakeLLM(
         [
-            'うん。\n\n[[natsume]]\n{"emotion":"neutral","silent":false,"memory_candidates":[]}',
-            "嗯。",
-            'さっき「こんにちは」って言ったでしょ。\n\n[[natsume]]\n{"emotion":"neutral","silent":false,"memory_candidates":[]}',
-            "你上一句说了你好。",
+            '嗯\n\n[[natsume]]\n{"emotion":"neutral","silent":false,"memory_candidates":[]}',
+            "うん",
+            '你上一句说了你好\n\n[[natsume]]\n{"emotion":"neutral","silent":false,"memory_candidates":[]}',
+            "さっき「こんにちは」って言ったでしょ",
         ]
     )
     agent = Agent(

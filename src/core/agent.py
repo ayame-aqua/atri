@@ -1,4 +1,4 @@
-"""拼 prompt、调 LLM、解析尾块、译成中文气泡。"""
+"""拼 prompt、调 LLM、解析尾块、中文气泡译成日语备 TTS。"""
 
 from __future__ import annotations
 
@@ -7,10 +7,12 @@ import uuid
 from typing import Final
 
 from src.core.llm import LLMClient, LLMError
+from src.core.lore import CONSTANT_FACTS, trailing_system
 from src.core.persona import load_persona
 from src.core.protocol import parse
 from src.core.session import SessionStore, Turn
-from src.core.translate import japanese_to_chinese
+from src.core.text_style import soften_chinese_punctuation
+from src.core.translate import chinese_to_japanese
 from src.core.types import InboundMessage, OutboundMessage
 from src.memory.store import MemoryStore
 
@@ -19,7 +21,8 @@ logger = logging.getLogger(__name__)
 WEB_CHANNEL_RULES: Final[str] = (
     "现在是网页私聊。必须回复。"
     "[[natsume]] 里 silent 必须是 false。"
-    "用户说中文；你只输出日语台词，不要输出中文正文。"
+    "用户说中文；你只输出中文台词。"
+    "听这一句实际在问什么。"
 )
 
 
@@ -40,7 +43,7 @@ class Agent:
     async def run(self, inbound: InboundMessage) -> OutboundMessage:
         persona = load_persona(self._persona_path)
         profile = self._memory.profile_block()
-        system_parts = [persona, WEB_CHANNEL_RULES]
+        system_parts = [persona, WEB_CHANNEL_RULES, CONSTANT_FACTS]
         if profile:
             system_parts.append("核心事实：\n" + profile)
         messages: list[dict[str, str]] = [
@@ -49,6 +52,7 @@ class Agent:
         for turn in self._sessions.history(inbound.chat_id):
             messages.append({"role": turn.role, "content": turn.text})
         messages.append({"role": "user", "content": inbound.text})
+        messages.append({"role": "system", "content": trailing_system(inbound.text)})
 
         try:
             raw = await self._llm.chat(messages)
@@ -62,17 +66,17 @@ class Agent:
         elif parsed.log_level == "warning":
             logger.warning("natsume block degraded message_id=%s", inbound.message_id)
 
-        speech_ja = parsed.visible_text.strip()
-        if not speech_ja:
+        zh = soften_chinese_punctuation(parsed.visible_text)
+        if not zh:
             raise LLMError("empty speech after parse")
 
-        zh = await japanese_to_chinese(self._llm, speech_ja)
+        speech_ja = await chinese_to_japanese(self._llm, zh)
         outbound = OutboundMessage(
             message_id=str(uuid.uuid4()),
             reply_to_id=inbound.message_id,
             chat_id=inbound.chat_id,
             texts=[zh],
-            speech_ja=speech_ja,
+            speech_ja=speech_ja or None,
             emotion=parsed.emotion,
             silent=False,
         )
@@ -86,7 +90,7 @@ class Agent:
                 role="assistant",
                 text=zh,
                 emotion=parsed.emotion,
-                speech_ja=speech_ja,
+                speech_ja=speech_ja or None,
             ),
         )
         return outbound
