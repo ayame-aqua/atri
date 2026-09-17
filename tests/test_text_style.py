@@ -16,6 +16,5 @@ def test_nameplate_period_softened() -> None:
 
 def test_question_mark_kept() -> None:
     assert (
-        soften_chinese_punctuation("哈？突然说什么。脑袋撞到了？")
-        == "哈？突然说什么，脑袋撞到了？"
+        soften_chinese_punctuation("哈？突然说什么。脑袋撞到了？") == "哈？突然说什么，脑袋撞到了？"
     )

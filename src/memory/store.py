@@ -128,8 +128,7 @@ class MemoryStore:
     def get_by_id(self, fact_id: int) -> Fact | None:
         with self._session() as conn:
             row = conn.execute(
-                "SELECT id, key, value, category, status, source, evidence "
-                "FROM facts WHERE id = ?",
+                "SELECT id, key, value, category, status, source, evidence FROM facts WHERE id = ?",
                 (fact_id,),
             ).fetchone()
         return None if row is None else _fact(row)

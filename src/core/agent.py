@@ -24,9 +24,7 @@ from src.memory.store import MemoryStore
 logger = logging.getLogger(__name__)
 
 WEB_CHANNEL_RULES: Final[str] = (
-    "现在是网页私聊，必须回复。"
-    "[[natsume]] 里 silent 必须是 false。"
-    "用户说中文；你只输出中文台词。"
+    "现在是网页私聊，必须回复。[[natsume]] 里 silent 必须是 false。用户说中文；你只输出中文台词。"
 )
 
 

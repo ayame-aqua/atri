@@ -34,7 +34,7 @@ _EXTRACT_SYSTEM = (
     "你是人设编辑，不是角色。根据用户对上一句的纠正，写一条以后生成要用的约束。"
     "只输出 JSON。"
     "要求：一句中文；写处事，不写可背诵台词；不改身份（大学生、咖啡馆打工、不是高中生）。"
-    "纠正含糊或不是人设问题则 {\"rule\": null}。"
+    '纠正含糊或不是人设问题则 {"rule": null}。'
 )
 
 
@@ -140,10 +140,7 @@ async def absorb_correction(
     last_reply: str,
 ) -> None:
     """从纠正里抽一条约束。抽取失败不影响这轮对话。"""
-    user_payload = (
-        f"上一句回复：{last_reply or '（没有）'}\n"
-        f"用户纠正：{user_text}"
-    )
+    user_payload = f"上一句回复：{last_reply or '（没有）'}\n用户纠正：{user_text}"
     try:
         raw = await llm.chat(
             [
