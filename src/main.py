@@ -17,6 +17,7 @@ from src.channels.web import assistant_text_frame, parse_user_text_frame
 from src.config import REPO_ROOT, load_config
 from src.core.agent import Agent
 from src.core.errors import BAD_REQUEST, human_message
+from src.core.living_notes import LivingNotesStore
 from src.core.llm import LLMClient, LLMError
 from src.core.persona import split_persona
 from src.core.session import SessionStore
@@ -66,12 +67,14 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
             llm = None
         sessions = SessionStore(max_turns=max_turns * 2)
         memory = MemoryStore()
+        living_notes = LivingNotesStore(REPO_ROOT / "data" / "living_notes.json")
         agent = (
             Agent(
                 persona_path=persona_path,
                 llm=llm,
                 sessions=sessions,
                 memory=memory,
+                living_notes=living_notes,
             )
             if llm is not None
             else None

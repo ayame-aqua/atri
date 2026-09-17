@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 
 from src.core.agent import Agent
+from src.core.living_notes import LivingNotesStore
 from src.core.llm import LLMError
 from src.core.session import SessionStore
 from src.core.types import InboundMessage
@@ -55,7 +56,7 @@ def test_agent_returns_chinese_bubble_and_japanese_speech() -> None:
     first_prompt = llm.calls[0]
     assert first_prompt[-2]["role"] == "user"
     assert first_prompt[-1]["role"] == "system"
-    assert "实际" in first_prompt[-1]["content"]
+    assert "发消息" in first_prompt[-1]["content"]
     assert outbound.speech_ja == "ナツメだけど"
     assert outbound.texts == ["四季夏目，就这些"]
     assert outbound.emotion == "shy"
@@ -84,3 +85,24 @@ def test_agent_keeps_history_for_next_turn() -> None:
     third_prompt = llm.calls[2]
     user_contents = [item["content"] for item in third_prompt if item["role"] == "user"]
     assert "你好" in user_contents
+
+
+def test_agent_absorbs_correction_into_prompt(tmp_path: Path) -> None:
+    notes = LivingNotesStore(tmp_path / "living_notes.json")
+    llm = FakeLLM(
+        [
+            '{"rule": "被夸后不要拆成几分真假来反问"}',
+            '嗯\n\n[[natsume]]\n{"emotion":"shy","silent":false,"memory_candidates":[]}',
+            "うん",
+        ]
+    )
+    agent = Agent(
+        persona_path=str(PERSONA),
+        llm=llm,  # type: ignore[arg-type]
+        sessions=SessionStore(max_turns=40),
+        memory=MemoryStore(),
+        living_notes=notes,
+    )
+    asyncio.run(agent.run(_inbound("m1", "这句有点ooc了")))
+    assert "拆成几分" in notes.as_block()
+    assert "拆成几分" in llm.calls[1][0]["content"]
