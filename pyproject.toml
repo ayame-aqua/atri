@@ -1,6 +1,6 @@
 [project]
 name = "shiki-natsume"
-version = "0.18.0"
+version = "0.20.0"
 description = "四季夏目 — 本机数字陪伴（文字 / 语音 / Live2D / QQ）"
 readme = "README.md"
 requires-python = ">=3.11"

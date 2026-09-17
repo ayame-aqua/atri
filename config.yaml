@@ -14,6 +14,7 @@ gateway:
 llm:
   provider: openai_compatible
   timeout_s: 60
+  disable_thinking: true
 
 speech:
   # P3：本机已有 GPT-SoVITS；权重不在本仓库

@@ -4,18 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>四季夏目</title>
-    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/assets/style.css" />
   </head>
   <body>
     <main class="app">
-      <header class="brand">四季夏目</header>
+      <header class="brand">
+        <span id="character-name">四季夏目</span>
+      </header>
       <section id="messages" class="messages" aria-live="polite"></section>
       <footer class="composer">
         <textarea id="input" rows="2" placeholder="跟她说点什么…"></textarea>
         <button id="send" type="button">发送</button>
       </footer>
-      <p id="status" class="status">P1 接线后可聊</p>
+      <p id="status" class="status">连接中…</p>
     </main>
-    <script src="/app.js"></script>
+    <script src="/assets/app.js"></script>
   </body>
 </html>
