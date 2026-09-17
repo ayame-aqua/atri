@@ -1,19 +1,10 @@
-"""世界书触发。"""
+"""世界书只保留常驻场景，不再按关键词打补丁。"""
 
-from src.core.lore import keyed_lore, trailing_system
-
-
-def test_keyed_lore_skips_unrelated() -> None:
-    assert keyed_lore("你好呀") == ""
+from src.core.lore import trailing_system
 
 
-def test_keyed_lore_school_scene() -> None:
-    text = keyed_lore("你应该就是我的新同桌了吧")
-    assert "大学" in text
-    assert "高中" in text
-
-
-def test_trailing_always_has_post_history() -> None:
-    text = trailing_system("怎么称呼诶")
-    assert "实际" in text
+def test_trailing_is_generic() -> None:
+    text = trailing_system("有没有菜单")
+    assert "发消息" in text
+    assert "吧台" not in text
     assert "同桌" not in text
