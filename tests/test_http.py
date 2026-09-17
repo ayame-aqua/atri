@@ -26,3 +26,11 @@ def test_index_page() -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "四季夏目" in response.text
+    assert "/memory" in response.text
+
+
+def test_memory_page() -> None:
+    client = TestClient(create_app())
+    response = client.get("/memory")
+    assert response.status_code == 200
+    assert "记忆" in response.text

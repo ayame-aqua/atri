@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>记忆 — 四季夏目</title>
+    <link rel="stylesheet" href="/assets/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="brand">
+        <span>记忆</span>
+        <a class="memory-link" href="/">聊天</a>
+      </header>
+      <p class="status">只有 active 会进对话。忘掉是归档，不是物理删除。</p>
+      <section id="facts" class="messages"></section>
+    </main>
+    <script>
+      const box = document.getElementById("facts");
+
+      async function loadFacts() {
+        const response = await fetch("/api/memory/facts?status=active");
+        const body = await response.json();
+        box.replaceChildren();
+        for (const fact of body.facts || []) {
+          const row = document.createElement("article");
+          row.className = "msg assistant";
+          const who = document.createElement("div");
+          who.className = "who";
+          who.textContent = fact.key;
+          const bubble = document.createElement("div");
+          bubble.className = "bubble";
+          const input = document.createElement("input");
+          input.value = fact.value;
+          input.style.width = "70%";
+          const save = document.createElement("button");
+          save.type = "button";
+          save.textContent = "保存";
+          save.addEventListener("click", async () => {
+            await fetch("/api/memory/facts/" + fact.id, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ value: input.value }),
+            });
+            await loadFacts();
+          });
+          const del = document.createElement("button");
+          del.type = "button";
+          del.textContent = "删除";
+          del.addEventListener("click", async () => {
+            await fetch("/api/memory/facts/" + fact.id, { method: "DELETE" });
+            await loadFacts();
+          });
+          bubble.append(input, save, del);
+          row.append(who, bubble);
+          box.append(row);
+        }
+      }
+
+      loadFacts();
+    </script>
+  </body>
+</html>

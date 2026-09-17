@@ -4,8 +4,8 @@ server:
 
 character: characters/natsume.md
 
-session:
-  max_turns: 20
+memory:
+  sqlite_path: data/memory.sqlite
 
 gateway:
   dedup_ttl_s: 600

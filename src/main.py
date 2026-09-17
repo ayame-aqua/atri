@@ -7,9 +7,10 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -22,7 +23,7 @@ from src.core.llm import LLMClient, LLMError
 from src.core.persona import split_persona
 from src.core.session import SessionStore
 from src.gateway import Gateway
-from src.memory.store import MemoryStore
+from src.memory.store import Fact, MemoryStore
 
 logger = logging.getLogger(__name__)
 WEB_DIR = REPO_ROOT / "web"
@@ -66,7 +67,10 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
             logger.exception("llm client init failed")
             llm = None
         sessions = SessionStore(max_turns=max_turns * 2)
-        memory = MemoryStore()
+        memory_cfg = settings.get("memory") or {}
+        sqlite_rel = str(memory_cfg.get("sqlite_path", "data/memory.sqlite"))
+        sqlite_path = Path(sqlite_rel) if os.path.isabs(sqlite_rel) else REPO_ROOT / sqlite_rel
+        memory = MemoryStore(sqlite_path, seed=True)
         living_notes = LivingNotesStore(REPO_ROOT / "data" / "living_notes.json")
         agent = (
             Agent(
@@ -80,6 +84,7 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
             else None
         )
         app.state.gateway = Gateway(dedup_ttl_s=dedup_ttl_s, agent=agent)
+        app.state.memory = memory
         app.state.persona_path = persona_path
         app.state.llm_ready = llm is not None
         logger.info(
@@ -101,6 +106,63 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
         meta, _body = split_persona(persona_path)
         name = meta.get("name") if isinstance(meta.get("name"), str) else "四季夏目"
         return {"name": name}
+
+    @app.get("/memory")
+    async def memory_page() -> FileResponse:
+        return FileResponse(WEB_DIR / "memory.html")
+
+    @app.get("/api/memory/facts")
+    async def list_memory_facts(status: str = "active") -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        filter_status = None if status in {"", "all"} else status
+        return {"facts": [_fact_json(item) for item in memory.list_facts(status=filter_status)]}
+
+    @app.post("/api/memory/facts")
+    async def create_memory_fact(payload: dict[str, Any]) -> dict[str, Any]:
+        key = payload.get("key")
+        value = payload.get("value")
+        if not isinstance(key, str) or not key.strip():
+            raise HTTPException(status_code=400, detail="key required")
+        if not isinstance(value, str) or not value.strip():
+            raise HTTPException(status_code=400, detail="value required")
+        category = payload.get("category", "other")
+        if not isinstance(category, str):
+            category = "other"
+        memory: MemoryStore = app.state.memory
+        fact = memory.add_fact(
+            key.strip(),
+            value.strip(),
+            category=category,
+            source="manual",
+            overwrite=True,
+        )
+        return _fact_json(fact)
+
+    @app.patch("/api/memory/facts/{fact_id}")
+    async def patch_memory_fact(fact_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        value = payload.get("value") if isinstance(payload.get("value"), str) else None
+        status = payload.get("status") if isinstance(payload.get("status"), str) else None
+        fact = memory.update_fact(fact_id, value=value, status=status)
+        if fact is None:
+            raise HTTPException(status_code=404, detail="fact not found")
+        return _fact_json(fact)
+
+    @app.delete("/api/memory/facts/{fact_id}")
+    async def delete_memory_fact(fact_id: int) -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        if not memory.delete_fact(fact_id):
+            raise HTTPException(status_code=404, detail="fact not found")
+        return {"ok": True}
+
+    @app.post("/api/memory/forget")
+    async def forget_memory(payload: dict[str, Any]) -> dict[str, Any]:
+        query = payload.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise HTTPException(status_code=400, detail="query required")
+        memory: MemoryStore = app.state.memory
+        hits = memory.forget(query.strip())
+        return {"facts": [_fact_json(item) for item in hits]}
 
     @app.get("/")
     async def index() -> FileResponse:
@@ -167,6 +229,18 @@ async def _send_error(websocket: WebSocket, message_id: Any, code: str) -> None:
     if isinstance(message_id, str) and message_id:
         frame["message_id"] = message_id
     await websocket.send_json(frame)
+
+
+def _fact_json(fact: Fact) -> dict[str, Any]:
+    return {
+        "id": fact.id,
+        "key": fact.key,
+        "value": fact.value,
+        "category": fact.category,
+        "status": fact.status,
+        "source": fact.source,
+        "evidence": fact.evidence,
+    }
 
 
 app = create_app()

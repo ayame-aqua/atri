@@ -54,11 +54,13 @@ class Agent:
                 user_text=inbound.text,
                 last_reply=self._last_assistant(inbound.chat_id),
             )
+        self._memory.apply_user_text(inbound.text)
         persona = load_persona(self._persona_path)
         profile = self._memory.profile_block()
-        system_parts = [persona, WEB_CHANNEL_RULES, SCENARIO, CONSTANT_FACTS]
+        system_parts = [persona]
         if profile:
             system_parts.append("核心事实：\n" + profile)
+        system_parts.extend([WEB_CHANNEL_RULES, SCENARIO, CONSTANT_FACTS])
         notes_block = self._living_notes.as_block() if self._living_notes else ""
         if notes_block:
             system_parts.append(notes_block)
@@ -81,6 +83,7 @@ class Agent:
             logger.error("natsume block parse failed message_id=%s", inbound.message_id)
         elif parsed.log_level == "warning":
             logger.warning("natsume block degraded message_id=%s", inbound.message_id)
+        self._memory.ingest_candidates(parsed.memory_candidates, parse_ok=parsed.parse_ok)
 
         zh = soften_chinese_punctuation(parsed.visible_text)
         if not zh:
