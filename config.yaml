@@ -1,0 +1,33 @@
+server:
+  host: 127.0.0.1
+  port: 8787
+
+character: characters/natsume.md
+
+session:
+  max_turns: 20
+
+gateway:
+  dedup_ttl_s: 600
+
+# 密钥只来自环境变量 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL
+llm:
+  provider: openai_compatible
+  timeout_s: 60
+
+speech:
+  # P3：本机 GPT-SoVITS；权重与干声在 data/natsume/，不进 git
+  tts_api_base: http://127.0.0.1:9880
+  tts_text_lang: ja
+  asr_model: faster-whisper-small
+
+channels:
+  web:
+    enabled: true
+  voice:
+    enabled: false
+  qq:
+    enabled: false
+  wechat:
+    enabled: false
+    experimental: true

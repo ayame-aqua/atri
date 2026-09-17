@@ -1,0 +1,18 @@
+# P4：Live2D 模型路径与 emotion → 表情映射
+# 模型文件放 web/live2d/natsume/（有权使用的资源，勿提交未授权拆包）
+
+model:
+  name: natsume
+  dir: web/live2d/natsume
+  # model_json: web/live2d/natsume/natsume.model3.json
+
+emotion_map:
+  neutral: idle
+  happy: happy
+  sad: sad
+  angry: angry
+  shy: shy
+
+mouth:
+  param: ParamMouthOpenY
+  driver: rms
