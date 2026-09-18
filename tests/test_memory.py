@@ -37,7 +37,10 @@ def test_candidates_need_parse_ok_and_low_risk(tmp_path: Path) -> None:
         [{"key": "relationship", "value": "已婚", "layer": "profile"}],
         parse_ok=True,
     )
-    assert store.get_by_key("relationship") is None
+    rel = store.get_by_key("relationship")
+    assert rel is not None
+    assert rel.status == "pending"
+    assert "已婚" not in store.profile_block()
     bad = parse("没有尾块")
     store.ingest_candidates(
         [{"key": "prefers.tea", "value": "喝茶"}],

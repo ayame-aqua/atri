@@ -19,6 +19,7 @@ from src.core.session import SessionStore, Turn
 from src.core.text_style import soften_chinese_punctuation
 from src.core.translate import chinese_to_japanese
 from src.core.types import InboundMessage, OutboundMessage
+from src.memory.constants import RECENT_TURNS_FOR_RETRIEVE
 from src.memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -55,9 +56,17 @@ class Agent:
         self._memory.apply_user_text(inbound.text)
         persona = load_persona(self._persona_path)
         profile = self._memory.profile_block()
+        style = self._memory.style_block()
+        recent = self._sessions.history(inbound.chat_id)
+        recent_text = " ".join(turn.text for turn in recent[-RECENT_TURNS_FOR_RETRIEVE:])
+        episodes = self._memory.episodes_block(inbound.text, extra=recent_text)
         system_parts = [persona]
         if profile:
             system_parts.append("核心事实：\n" + profile)
+        if style:
+            system_parts.append(style)
+        if episodes:
+            system_parts.append(episodes)
         system_parts.extend([WEB_CHANNEL_RULES, SCENARIO, CONSTANT_FACTS])
         notes_block = self._living_notes.as_block() if self._living_notes else ""
         if notes_block:

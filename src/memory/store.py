@@ -1,4 +1,4 @@
-"""SQLite 核心事实。P2-A：跨重启记得称呼和约定。"""
+"""SQLite 记忆。P2-A 事实；P2-B 待确认、情节、风格。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,28 @@ from pathlib import Path
 from typing import Any
 
 from src.config import REPO_ROOT
+from src.memory.constants import (
+    DEFAULT_CHAT_ID,
+    DEFAULT_RETRIEVE_K,
+    DEFAULT_STYLE_MAX,
+    EPISODE_LAYERS,
+    HIGH_RISK_PREFIXES,
+    LAYER_PROFILE,
+    RETRIEVE_K_MAX,
+    RETRIEVE_K_MIN,
+    SOURCE_EXTRACT,
+    SOURCE_GROUP_IMPORT,
+    SOURCE_USER_CMD,
+    STATUS_ACTIVE,
+    STATUS_ARCHIVED,
+    STATUS_CANDIDATE,
+    STATUS_CONFIRMED,
+    STATUS_PENDING,
+    STATUS_REJECTED,
+    STYLE_LAYERS,
+)
+from src.memory.embedder import embed_text
+from src.memory.vectors import EpisodeIndex, embedding_id_for
 
 logger = logging.getLogger(__name__)
 
@@ -43,30 +65,93 @@ class Fact:
     evidence: str | None
 
 
+@dataclass(frozen=True)
+class Episode:
+    id: int
+    summary: str
+    happened_at: str
+    source_chat_id: str
+    status: str
+    embedding_id: str | None
+
+
+@dataclass(frozen=True)
+class StyleTerm:
+    id: int
+    term: str
+    meaning: str
+    usage: str
+    status: str
+    evidence: str | None
+    count: int
+
+
 class MemoryStore:
     def __init__(
         self,
         path: Path | str | None = None,
         *,
         seed: bool = False,
+        vector_path: Path | str | None = None,
+        retrieve_k: int = DEFAULT_RETRIEVE_K,
+        style_max: int = DEFAULT_STYLE_MAX,
     ) -> None:
         self._path = path
         self._seed = seed
         self._conn: sqlite3.Connection | None = None
+        self._retrieve_k = _clamp_k(retrieve_k)
+        self._style_max = max(1, int(style_max))
+        self._index = EpisodeIndex(vector_path) if vector_path is not None else None
         self._ensure_schema()
         if seed:
             self._seed_defaults()
 
     def profile_block(self) -> str:
-        rows = self.list_facts(status="active")
+        rows = self.list_facts(status=STATUS_ACTIVE)
         if not rows:
             return ""
         lines = [f"- {row.key}: {row.value}" for row in rows]
         return "长期记忆，不是刚刚这句对话：\n" + "\n".join(lines)
 
-    def retrieve(self, query: str, k: int = 5) -> list[Any]:
-        del query, k
-        return []
+    def style_block(self, limit: int | None = None) -> str:
+        cap = self._style_max if limit is None else max(1, int(limit))
+        rows = self.list_style(status=STATUS_CONFIRMED)[:cap]
+        if not rows:
+            return ""
+        lines = []
+        for row in rows:
+            line = f"- {row.term}：{row.meaning}"
+            if row.usage:
+                line += f" 用法：{row.usage}"
+            lines.append(line)
+        return "已确认的口吻与黑话（按这个说，不是当前对话）：\n" + "\n".join(lines)
+
+    def episodes_block(self, query: str, extra: str = "") -> str:
+        text = " ".join(part for part in (query, extra) if part).strip()
+        rows = self.retrieve(text, k=self._retrieve_k)
+        if not rows:
+            return ""
+        lines = [f"- {row.happened_at} {row.source_chat_id}：{row.summary}" for row in rows]
+        return "检索到的情节记忆（长期记忆，不是当前对话）：\n" + "\n".join(lines)
+
+    def retrieve(self, query: str, k: int = DEFAULT_RETRIEVE_K) -> list[Episode]:
+        if self._index is None:
+            return []
+        limit = _clamp_k(k)
+        hits = self._index.search(embed_text(query), k=max(limit * 3, RETRIEVE_K_MAX))
+        found: list[Episode] = []
+        seen: set[int] = set()
+        for hit in hits:
+            if hit.episode_id in seen:
+                continue
+            episode = self.get_episode(hit.episode_id)
+            if episode is None or episode.status != STATUS_ACTIVE:
+                continue
+            seen.add(episode.id)
+            found.append(episode)
+            if len(found) >= limit:
+                break
+        return found
 
     def add_fact(
         self,
@@ -77,40 +162,50 @@ class MemoryStore:
         source: str = "manual",
         evidence: str | None = None,
         overwrite: bool = False,
+        status: str = STATUS_ACTIVE,
     ) -> Fact:
         mapped_category = _category(category)
+        write_status = _fact_status(status)
         existing = self.get_by_key(key)
         if existing is not None and not overwrite:
             if _protected(key):
                 logger.info("memory skip protected key=%s", key)
                 return existing
-        if existing is not None and source != "user_cmd" and _protected(key):
+        if existing is not None and source != SOURCE_USER_CMD and _protected(key):
             logger.info("memory skip protected key=%s", key)
+            return existing
+        if (
+            existing is not None
+            and existing.status == STATUS_ACTIVE
+            and source == SOURCE_EXTRACT
+            and write_status == STATUS_PENDING
+        ):
+            logger.info("memory skip extract over active key=%s", key)
             return existing
         with self._session() as conn:
             conn.execute(
                 """
                 INSERT INTO facts (key, value, category, status, source, evidence, updated_at)
-                VALUES (?, ?, ?, 'active', ?, ?, datetime('now'))
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(key) DO UPDATE SET
                     value = excluded.value,
                     category = excluded.category,
-                    status = 'active',
+                    status = excluded.status,
                     source = excluded.source,
                     evidence = excluded.evidence,
                     updated_at = datetime('now')
                 """,
-                (key, value, mapped_category, source, evidence),
+                (key, value, mapped_category, write_status, source, evidence),
             )
             conn.commit()
         fact = self.get_by_key(key)
         if fact is None:
             msg = f"memory write failed key={key}"
             raise RuntimeError(msg)
-        logger.info("memory upsert key=%s source=%s", key, source)
+        logger.info("memory upsert key=%s source=%s status=%s", key, source, fact.status)
         return fact
 
-    def list_facts(self, status: str | None = "active") -> list[Fact]:
+    def list_facts(self, status: str | None = STATUS_ACTIVE) -> list[Fact]:
         with self._session() as conn:
             if status:
                 cursor = conn.execute(
@@ -153,7 +248,7 @@ class MemoryStore:
         if current is None:
             return None
         new_value = current.value if value is None else value
-        new_status = current.status if status is None else status
+        new_status = current.status if status is None else _fact_status(status)
         with self._session() as conn:
             conn.execute(
                 "UPDATE facts SET value = ?, status = ?, updated_at = datetime('now') WHERE id = ?",
@@ -173,9 +268,9 @@ class MemoryStore:
         if not needle:
             return []
         hits: list[Fact] = []
-        for fact in self.list_facts(status="active"):
+        for fact in self.list_facts(status=STATUS_ACTIVE):
             if needle in fact.key or needle in fact.value:
-                updated = self.update_fact(fact.id, status="archived")
+                updated = self.update_fact(fact.id, status=STATUS_ARCHIVED)
                 if updated is not None:
                     hits.append(updated)
                     logger.info("memory archived id=%s key=%s", fact.id, fact.key)
@@ -192,7 +287,7 @@ class MemoryStore:
                 key,
                 value,
                 category="preference",
-                source="user_cmd",
+                source=SOURCE_USER_CMD,
                 evidence=raw,
                 overwrite=True,
             )
@@ -209,7 +304,7 @@ class MemoryStore:
                 KEY_DISPLAY_NAME,
                 display,
                 category="identity",
-                source="user_cmd",
+                source=SOURCE_USER_CMD,
                 evidence=raw,
                 overwrite=True,
             )
@@ -217,7 +312,7 @@ class MemoryStore:
                 KEY_NICKNAME,
                 nickname,
                 category="identity",
-                source="user_cmd",
+                source=SOURCE_USER_CMD,
                 evidence=raw,
                 overwrite=True,
             )
@@ -231,22 +326,279 @@ class MemoryStore:
         for item in candidates:
             if not isinstance(item, dict):
                 continue
-            key = item.get("key")
-            value = item.get("value")
-            if not isinstance(key, str) or not isinstance(value, str):
+            self._ingest_one(item, source=SOURCE_EXTRACT)
+
+    def add_episode(
+        self,
+        summary: str,
+        *,
+        source_chat_id: str = DEFAULT_CHAT_ID,
+        status: str = STATUS_PENDING,
+        happened_at: str | None = None,
+    ) -> Episode:
+        text = (summary or "").strip()
+        if not text:
+            msg = "episode summary required"
+            raise ValueError(msg)
+        write_status = _episode_status(status)
+        chat_id = source_chat_id.strip() or DEFAULT_CHAT_ID
+        with self._session() as conn:
+            if happened_at:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO episodes (summary, happened_at, source_chat_id, status)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (text, happened_at, chat_id, write_status),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO episodes (summary, source_chat_id, status)
+                    VALUES (?, ?, ?)
+                    """,
+                    (text, chat_id, write_status),
+                )
+            episode_id = int(cursor.lastrowid)
+            embed_id = embedding_id_for(episode_id)
+            conn.execute(
+                "UPDATE episodes SET embedding_id = ? WHERE id = ?",
+                (embed_id, episode_id),
+            )
+            conn.commit()
+        if self._index is not None:
+            self._index.upsert(embed_id, episode_id, embed_text(text))
+        episode = self.get_episode(episode_id)
+        if episode is None:
+            msg = f"episode write failed id={episode_id}"
+            raise RuntimeError(msg)
+        logger.info("memory episode id=%s status=%s", episode.id, episode.status)
+        return episode
+
+    def list_episodes(self, status: str | None = None) -> list[Episode]:
+        with self._session() as conn:
+            if status:
+                cursor = conn.execute(
+                    "SELECT id, summary, happened_at, source_chat_id, status, embedding_id "
+                    "FROM episodes WHERE status = ? ORDER BY id",
+                    (status,),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT id, summary, happened_at, source_chat_id, status, embedding_id "
+                    "FROM episodes ORDER BY id"
+                )
+            return [_episode(row) for row in cursor.fetchall()]
+
+    def get_episode(self, episode_id: int) -> Episode | None:
+        with self._session() as conn:
+            row = conn.execute(
+                "SELECT id, summary, happened_at, source_chat_id, status, embedding_id "
+                "FROM episodes WHERE id = ?",
+                (episode_id,),
+            ).fetchone()
+        return None if row is None else _episode(row)
+
+    def update_episode(
+        self,
+        episode_id: int,
+        *,
+        status: str | None = None,
+        summary: str | None = None,
+    ) -> Episode | None:
+        current = self.get_episode(episode_id)
+        if current is None:
+            return None
+        new_status = current.status if status is None else _episode_status(status)
+        new_summary = current.summary if summary is None else summary.strip()
+        with self._session() as conn:
+            conn.execute(
+                "UPDATE episodes SET summary = ?, status = ? WHERE id = ?",
+                (new_summary, new_status, episode_id),
+            )
+            conn.commit()
+        updated = self.get_episode(episode_id)
+        if updated is not None and updated.embedding_id and self._index is not None:
+            if new_status == STATUS_ARCHIVED:
+                self._index.delete(updated.embedding_id)
+            else:
+                self._index.upsert(updated.embedding_id, updated.id, embed_text(updated.summary))
+        return updated
+
+    def add_style_term(
+        self,
+        term: str,
+        meaning: str,
+        *,
+        usage: str = "",
+        evidence: str | None = None,
+        status: str = STATUS_CANDIDATE,
+        source_count: int = 1,
+    ) -> StyleTerm:
+        name = (term or "").strip()
+        sense = (meaning or "").strip()
+        if not name or not sense:
+            msg = "style term and meaning required"
+            raise ValueError(msg)
+        write_status = _style_status(status)
+        with self._session() as conn:
+            conn.execute(
+                """
+                INSERT INTO style_terms (term, meaning, usage, status, evidence, count, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                ON CONFLICT(term) DO UPDATE SET
+                    meaning = CASE
+                        WHEN style_terms.status = 'candidate' THEN excluded.meaning
+                        ELSE style_terms.meaning
+                    END,
+                    usage = CASE
+                        WHEN style_terms.status = 'candidate' THEN excluded.usage
+                        ELSE style_terms.usage
+                    END,
+                    evidence = excluded.evidence,
+                    count = style_terms.count + excluded.count,
+                    updated_at = datetime('now')
+                """,
+                (name, sense, usage.strip(), write_status, evidence, source_count),
+            )
+            conn.commit()
+        row = self.get_style_by_term(name)
+        if row is None:
+            msg = f"style write failed term={name}"
+            raise RuntimeError(msg)
+        logger.info("memory style id=%s term=%s status=%s", row.id, row.term, row.status)
+        return row
+
+    def list_style(self, status: str | None = None) -> list[StyleTerm]:
+        with self._session() as conn:
+            if status:
+                cursor = conn.execute(
+                    "SELECT id, term, meaning, usage, status, evidence, count "
+                    "FROM style_terms WHERE status = ? ORDER BY id",
+                    (status,),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT id, term, meaning, usage, status, evidence, count "
+                    "FROM style_terms ORDER BY id"
+                )
+            return [_style(row) for row in cursor.fetchall()]
+
+    def get_style(self, style_id: int) -> StyleTerm | None:
+        with self._session() as conn:
+            row = conn.execute(
+                "SELECT id, term, meaning, usage, status, evidence, count "
+                "FROM style_terms WHERE id = ?",
+                (style_id,),
+            ).fetchone()
+        return None if row is None else _style(row)
+
+    def get_style_by_term(self, term: str) -> StyleTerm | None:
+        with self._session() as conn:
+            row = conn.execute(
+                "SELECT id, term, meaning, usage, status, evidence, count "
+                "FROM style_terms WHERE term = ?",
+                (term,),
+            ).fetchone()
+        return None if row is None else _style(row)
+
+    def update_style(self, style_id: int, *, status: str) -> StyleTerm | None:
+        if self.get_style(style_id) is None:
+            return None
+        write_status = _style_status(status)
+        with self._session() as conn:
+            conn.execute(
+                "UPDATE style_terms SET status = ?, updated_at = datetime('now') WHERE id = ?",
+                (write_status, style_id),
+            )
+            conn.commit()
+        return self.get_style(style_id)
+
+    def confirm_style(self, style_id: int) -> StyleTerm | None:
+        return self.update_style(style_id, status=STATUS_CONFIRMED)
+
+    def ingest_import_rows(self, rows: list[dict[str, Any]]) -> int:
+        """群导入：事实 pending、风格 candidate、情节 pending，不转正。"""
+        written = 0
+        for item in rows:
+            if not isinstance(item, dict):
                 continue
-            if not any(key.startswith(prefix) for prefix in LOW_RISK_PREFIXES):
-                logger.info("memory skip high-risk candidate key=%s", key)
-                continue
-            if _protected(key):
-                continue
+            row = dict(item)
+            row.setdefault("layer", LAYER_PROFILE)
+            self._ingest_one(row, source=SOURCE_GROUP_IMPORT)
+            written += 1
+        return written
+
+    def _ingest_one(self, item: dict[str, Any], *, source: str) -> None:
+        layer = item.get("layer") or LAYER_PROFILE
+        if not isinstance(layer, str):
+            return
+        if layer in EPISODE_LAYERS:
+            summary = item.get("summary") if isinstance(item.get("summary"), str) else None
+            if summary is None and isinstance(item.get("value"), str):
+                summary = item["value"]
+            if not summary or not summary.strip():
+                return
+            chat_id = item.get("source_chat_id")
+            source_chat_id = chat_id if isinstance(chat_id, str) and chat_id else DEFAULT_CHAT_ID
+            self.add_episode(
+                summary.strip(),
+                source_chat_id=source_chat_id,
+                status=STATUS_PENDING,
+            )
+            return
+        if layer in STYLE_LAYERS:
+            term = item.get("term") if isinstance(item.get("term"), str) else item.get("key")
+            meaning = (
+                item.get("meaning") if isinstance(item.get("meaning"), str) else item.get("value")
+            )
+            usage = item.get("usage") if isinstance(item.get("usage"), str) else ""
+            evidence = item.get("evidence") if isinstance(item.get("evidence"), str) else None
+            if not isinstance(term, str) or not isinstance(meaning, str):
+                return
+            self.add_style_term(
+                term,
+                meaning,
+                usage=usage or "",
+                evidence=evidence,
+                status=STATUS_CANDIDATE,
+            )
+            return
+        key = item.get("key")
+        value = item.get("value")
+        if not isinstance(key, str) or not isinstance(value, str):
+            return
+        if source == SOURCE_GROUP_IMPORT:
+            self.add_fact(
+                key,
+                value,
+                category=_category_for_key(key),
+                source=source,
+                overwrite=False,
+                status=STATUS_PENDING,
+            )
+            return
+        if any(key.startswith(prefix) for prefix in LOW_RISK_PREFIXES):
             self.add_fact(
                 key,
                 value,
                 category="preference",
-                source="extract",
+                source=source,
                 overwrite=False,
+                status=STATUS_ACTIVE,
             )
+            return
+        if _high_risk(key):
+            self.add_fact(
+                key,
+                value,
+                category=_category_for_key(key),
+                source=source,
+                overwrite=False,
+                status=STATUS_PENDING,
+            )
+            return
+        logger.info("memory skip unknown-risk candidate key=%s", key)
 
     def _ensure_schema(self) -> None:
         sql = SCHEMA_PATH.read_text(encoding="utf-8")
@@ -316,6 +668,29 @@ def _fact(row: sqlite3.Row) -> Fact:
     )
 
 
+def _episode(row: sqlite3.Row) -> Episode:
+    return Episode(
+        id=int(row["id"]),
+        summary=str(row["summary"]),
+        happened_at=str(row["happened_at"]),
+        source_chat_id=str(row["source_chat_id"]),
+        status=str(row["status"]),
+        embedding_id=row["embedding_id"],
+    )
+
+
+def _style(row: sqlite3.Row) -> StyleTerm:
+    return StyleTerm(
+        id=int(row["id"]),
+        term=str(row["term"]),
+        meaning=str(row["meaning"]),
+        usage=str(row["usage"]),
+        status=str(row["status"]),
+        evidence=row["evidence"],
+        count=int(row["count"]),
+    )
+
+
 def _category(raw: str) -> str:
     allowed = {"identity", "relationship", "rule", "preference", "other"}
     if raw in allowed:
@@ -325,10 +700,26 @@ def _category(raw: str) -> str:
     return "other"
 
 
+def _category_for_key(key: str) -> str:
+    if key == KEY_RELATIONSHIP:
+        return "relationship"
+    if key.startswith("rule."):
+        return "rule"
+    if key.startswith("dislikes.") or key.startswith("prefers."):
+        return "preference"
+    return "other"
+
+
 def _protected(key: str) -> bool:
     if key in PROTECTED_KEYS:
         return True
     return any(key.startswith(prefix) for prefix in PROTECTED_PREFIXES)
+
+
+def _high_risk(key: str) -> bool:
+    if key in PROTECTED_KEYS:
+        return True
+    return any(key.startswith(prefix) for prefix in HIGH_RISK_PREFIXES)
 
 
 def _remember_key(value: str) -> str:
@@ -336,3 +727,28 @@ def _remember_key(value: str) -> str:
     if "讨厌" in value or "别催" in value or "不要催" in value:
         return f"dislikes.{slug}"
     return f"prefers.{slug}"
+
+
+def _clamp_k(k: int) -> int:
+    return max(RETRIEVE_K_MIN, min(int(k), RETRIEVE_K_MAX))
+
+
+def _fact_status(raw: str) -> str:
+    allowed = {STATUS_ACTIVE, STATUS_PENDING, STATUS_ARCHIVED}
+    if raw in allowed:
+        return raw
+    return STATUS_ACTIVE
+
+
+def _episode_status(raw: str) -> str:
+    allowed = {STATUS_ACTIVE, STATUS_PENDING, STATUS_ARCHIVED}
+    if raw in allowed:
+        return raw
+    return STATUS_PENDING
+
+
+def _style_status(raw: str) -> str:
+    allowed = {STATUS_CANDIDATE, STATUS_CONFIRMED, STATUS_REJECTED}
+    if raw in allowed:
+        return raw
+    return STATUS_CANDIDATE

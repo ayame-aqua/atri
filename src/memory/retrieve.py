@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from src.memory.constants import DEFAULT_RETRIEVE_K
+from src.memory.store import Episode, MemoryStore
 
 
-def retrieve_episodes(query: str, k: int = 5) -> list[Any]:
-    del query, k
-    return []
+def retrieve_episodes(
+    store: MemoryStore,
+    query: str,
+    k: int = DEFAULT_RETRIEVE_K,
+) -> list[Episode]:
+    return store.retrieve(query, k=k)

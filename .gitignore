@@ -5,6 +5,7 @@
 
 # runtime（含四季夏目语音/权重，禁止 push）
 data/
+engines/GPT-SoVITS/
 __pycache__/
 *.py[cod]
 .venv/

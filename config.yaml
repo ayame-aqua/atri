@@ -6,6 +6,11 @@ character: characters/natsume.md
 
 memory:
   sqlite_path: data/memory.sqlite
+  # P2-B：方案允许 Chroma 或 LanceDB。这里用嵌入式 LanceDB，目录 gitignore。
+  vector_backend: lancedb
+  vector_path: data/vectors
+  retrieve_k: 5
+  style_max: 8
 
 gateway:
   dedup_ttl_s: 600
@@ -17,7 +22,7 @@ llm:
   disable_thinking: true
 
 speech:
-  # P3：本机已有 GPT-SoVITS；权重不在本仓库
+  # P3：本机引擎在 engines/GPT-SoVITS（gitignore）；权重在 data/natsume/weights/
   tts_api_base: http://127.0.0.1:9880
   tts_text_lang: ja
   asr_model: faster-whisper-small

@@ -12,52 +12,177 @@
         <span>记忆</span>
         <a class="memory-link" href="/">聊天</a>
       </header>
-      <p class="status">只有 active 会进对话。忘掉是归档，不是物理删除。</p>
-      <section id="facts" class="messages"></section>
+      <p class="status">
+        只有已确认项会进对话。待确认先勾选。忘掉是归档。情节靠检索，不是刚刚那句。
+      </p>
+      <div class="memory-actions">
+        <button id="summarize" type="button">生成本会话摘要</button>
+      </div>
+      <p id="notice" class="status"></p>
+      <section class="memory-section">
+        <h2>待确认事实</h2>
+        <div id="pending-facts" class="messages"></div>
+      </section>
+      <section class="memory-section">
+        <h2>已生效事实</h2>
+        <div id="active-facts" class="messages"></div>
+      </section>
+      <section class="memory-section">
+        <h2>口吻 / 黑话</h2>
+        <div id="style-terms" class="messages"></div>
+      </section>
+      <section class="memory-section">
+        <h2>情节摘要</h2>
+        <div id="episodes" class="messages"></div>
+      </section>
     </main>
     <script>
-      const box = document.getElementById("facts");
+      const notice = document.getElementById("notice");
 
-      async function loadFacts() {
-        const response = await fetch("/api/memory/facts?status=active");
-        const body = await response.json();
-        box.replaceChildren();
+      function setNotice(text) {
+        notice.textContent = text || "";
+      }
+
+      function row(title, bodyNodes) {
+        const article = document.createElement("article");
+        article.className = "msg assistant";
+        const who = document.createElement("div");
+        who.className = "who";
+        who.textContent = title;
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        bubble.append(...bodyNodes);
+        article.append(who, bubble);
+        return article;
+      }
+
+      function button(label, onClick) {
+        const el = document.createElement("button");
+        el.type = "button";
+        el.textContent = label;
+        el.addEventListener("click", onClick);
+        return el;
+      }
+
+      async function readJson(url, options) {
+        const response = await fetch(url, options);
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(body.detail || response.statusText);
+        }
+        return body;
+      }
+
+      async function loadFacts(status, mount) {
+        const body = await readJson("/api/memory/facts?status=" + status);
+        mount.replaceChildren();
         for (const fact of body.facts || []) {
-          const row = document.createElement("article");
-          row.className = "msg assistant";
-          const who = document.createElement("div");
-          who.className = "who";
-          who.textContent = fact.key;
-          const bubble = document.createElement("div");
-          bubble.className = "bubble";
           const input = document.createElement("input");
           input.value = fact.value;
-          input.style.width = "70%";
-          const save = document.createElement("button");
-          save.type = "button";
-          save.textContent = "保存";
-          save.addEventListener("click", async () => {
-            await fetch("/api/memory/facts/" + fact.id, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ value: input.value }),
-            });
-            await loadFacts();
-          });
-          const del = document.createElement("button");
-          del.type = "button";
-          del.textContent = "删除";
-          del.addEventListener("click", async () => {
-            await fetch("/api/memory/facts/" + fact.id, { method: "DELETE" });
-            await loadFacts();
-          });
-          bubble.append(input, save, del);
-          row.append(who, bubble);
-          box.append(row);
+          const nodes = [input];
+          if (status === "pending") {
+            nodes.push(
+              button("确认", async () => {
+                await readJson("/api/memory/facts/" + fact.id, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ status: "active", value: input.value }),
+                });
+                await refresh();
+              }),
+              button("忽略", async () => {
+                await readJson("/api/memory/facts/" + fact.id, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ status: "archived" }),
+                });
+                await refresh();
+              })
+            );
+          } else {
+            nodes.push(
+              button("保存", async () => {
+                await readJson("/api/memory/facts/" + fact.id, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ value: input.value }),
+                });
+                await refresh();
+              }),
+              button("删除", async () => {
+                await fetch("/api/memory/facts/" + fact.id, { method: "DELETE" });
+                await refresh();
+              })
+            );
+          }
+          mount.append(row(fact.key + " · " + fact.status, nodes));
         }
       }
 
-      loadFacts();
+      async function loadStyle() {
+        const box = document.getElementById("style-terms");
+        const body = await readJson("/api/memory/style?status=all");
+        box.replaceChildren();
+        for (const term of body.style || []) {
+          const nodes = [
+            document.createTextNode(term.meaning + (term.usage ? " 用法：" + term.usage : "")),
+          ];
+          if (term.status === "candidate") {
+            nodes.push(
+              button("确认", async () => {
+                await readJson("/api/memory/style/" + term.id + "/confirm", { method: "POST" });
+                await refresh();
+              })
+            );
+          }
+          box.append(row(term.term + " · " + term.status, nodes));
+        }
+      }
+
+      async function loadEpisodes() {
+        const box = document.getElementById("episodes");
+        const body = await readJson("/api/memory/episodes?status=all");
+        box.replaceChildren();
+        for (const episode of body.episodes || []) {
+          const nodes = [document.createTextNode(episode.summary)];
+          if (episode.status === "pending") {
+            nodes.push(
+              button("确认", async () => {
+                await readJson("/api/memory/episodes/" + episode.id + "/confirm", {
+                  method: "POST",
+                });
+                await refresh();
+              })
+            );
+          }
+          box.append(
+            row(episode.happened_at + " · " + episode.source_chat_id + " · " + episode.status, nodes)
+          );
+        }
+      }
+
+      async function refresh() {
+        await loadFacts("pending", document.getElementById("pending-facts"));
+        await loadFacts("active", document.getElementById("active-facts"));
+        await loadStyle();
+        await loadEpisodes();
+      }
+
+      document.getElementById("summarize").addEventListener("click", async () => {
+        try {
+          const episode = await readJson("/api/memory/summarize-session", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chat_id: "web:local" }),
+          });
+          setNotice("已写入待确认摘要：" + episode.summary);
+          await refresh();
+        } catch (err) {
+          setNotice(String(err.message || err));
+        }
+      });
+
+      refresh().catch((err) => setNotice(String(err.message || err)));
     </script>
   </body>
 </html>

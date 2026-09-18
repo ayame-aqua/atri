@@ -1,0 +1,25 @@
+{
+  "facts": [
+    {
+      "layer": "profile",
+      "key": "prefers.early_sleep",
+      "value": "下周要早点睡",
+      "evidence": "李雷: 下周要早点睡"
+    }
+  ],
+  "style_terms": [
+    {
+      "layer": "style",
+      "term": "加糖",
+      "meaning": "事情顺利",
+      "usage": "随口说",
+      "evidence": "我们那套「加糖」就是事情顺利的意思"
+    }
+  ],
+  "episodes": [
+    {
+      "layer": "episode",
+      "summary": "群里约了早点睡，并说明加糖是顺利的意思"
+    }
+  ]
+}

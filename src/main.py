@@ -23,10 +23,71 @@ from src.core.llm import LLMClient, LLMError
 from src.core.persona import split_persona
 from src.core.session import SessionStore
 from src.gateway import Gateway
-from src.memory.store import Fact, MemoryStore
+from src.memory.constants import (
+    DEFAULT_CHAT_ID,
+    DEFAULT_RETRIEVE_K,
+    DEFAULT_STYLE_MAX,
+    STATUS_ACTIVE,
+    STATUS_CONFIRMED,
+    STATUS_PENDING,
+    VECTOR_BACKEND_LANCEDB,
+)
+from src.memory.store import Episode, Fact, MemoryStore, StyleTerm
+from src.memory.summarize import summarize_turns
 
 logger = logging.getLogger(__name__)
 WEB_DIR = REPO_ROOT / "web"
+
+
+def _attach_runtime(
+    app: FastAPI,
+    settings: dict[str, Any],
+    *,
+    persona_path: str,
+    max_turns: int,
+    dedup_ttl_s: float,
+) -> None:
+    try:
+        llm = _build_llm(settings)
+    except LLMError:
+        logger.exception("llm client init failed")
+        llm = None
+    sessions = SessionStore(max_turns=max_turns * 2)
+    memory_cfg = settings.get("memory") or {}
+    sqlite_rel = str(memory_cfg.get("sqlite_path", "data/memory.sqlite"))
+    sqlite_path = Path(sqlite_rel) if os.path.isabs(sqlite_rel) else REPO_ROOT / sqlite_rel
+    vector_rel = str(memory_cfg.get("vector_path", "data/vectors"))
+    vector_path = Path(vector_rel) if os.path.isabs(vector_rel) else REPO_ROOT / vector_rel
+    backend = str(memory_cfg.get("vector_backend", VECTOR_BACKEND_LANCEDB))
+    if backend != VECTOR_BACKEND_LANCEDB:
+        logger.warning("memory vector_backend=%s unsupported, using lancedb", backend)
+    retrieve_k = int(memory_cfg.get("retrieve_k", DEFAULT_RETRIEVE_K))
+    style_max = int(memory_cfg.get("style_max", DEFAULT_STYLE_MAX))
+    memory = MemoryStore(
+        sqlite_path,
+        seed=True,
+        vector_path=vector_path,
+        retrieve_k=retrieve_k,
+        style_max=style_max,
+    )
+    living_notes = LivingNotesStore(REPO_ROOT / "data" / "living_notes.json")
+    agent = (
+        Agent(
+            persona_path=persona_path,
+            llm=llm,
+            sessions=sessions,
+            memory=memory,
+            living_notes=living_notes,
+        )
+        if llm is not None
+        else None
+    )
+    app.state.gateway = Gateway(dedup_ttl_s=dedup_ttl_s, agent=agent)
+    app.state.memory = memory
+    app.state.sessions = sessions
+    app.state.llm = llm
+    app.state.persona_path = persona_path
+    app.state.llm_ready = llm is not None
 
 
 def _build_llm(config: dict[str, Any]) -> LLMClient:
@@ -61,32 +122,6 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
             level=logging.INFO,
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
         )
-        try:
-            llm = _build_llm(settings)
-        except LLMError:
-            logger.exception("llm client init failed")
-            llm = None
-        sessions = SessionStore(max_turns=max_turns * 2)
-        memory_cfg = settings.get("memory") or {}
-        sqlite_rel = str(memory_cfg.get("sqlite_path", "data/memory.sqlite"))
-        sqlite_path = Path(sqlite_rel) if os.path.isabs(sqlite_rel) else REPO_ROOT / sqlite_rel
-        memory = MemoryStore(sqlite_path, seed=True)
-        living_notes = LivingNotesStore(REPO_ROOT / "data" / "living_notes.json")
-        agent = (
-            Agent(
-                persona_path=persona_path,
-                llm=llm,
-                sessions=sessions,
-                memory=memory,
-                living_notes=living_notes,
-            )
-            if llm is not None
-            else None
-        )
-        app.state.gateway = Gateway(dedup_ttl_s=dedup_ttl_s, agent=agent)
-        app.state.memory = memory
-        app.state.persona_path = persona_path
-        app.state.llm_ready = llm is not None
         logger.info(
             "natsume web listening host=%s port=%s llm_ready=%s",
             server_cfg.get("host", "127.0.0.1"),
@@ -96,6 +131,13 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
         yield
 
     app = FastAPI(title="shiki-natsume", lifespan=lifespan)
+    _attach_runtime(
+        app,
+        settings,
+        persona_path=persona_path,
+        max_turns=max_turns,
+        dedup_ttl_s=dedup_ttl_s,
+    )
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -163,6 +205,60 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
         memory: MemoryStore = app.state.memory
         hits = memory.forget(query.strip())
         return {"facts": [_fact_json(item) for item in hits]}
+
+    @app.get("/api/memory/episodes")
+    async def list_memory_episodes(status: str = "") -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        filter_status = None if status in {"", "all"} else status
+        return {
+            "episodes": [_episode_json(item) for item in memory.list_episodes(status=filter_status)]
+        }
+
+    @app.post("/api/memory/episodes/{episode_id}/confirm")
+    async def confirm_memory_episode(episode_id: int) -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        episode = memory.update_episode(episode_id, status=STATUS_ACTIVE)
+        if episode is None:
+            raise HTTPException(status_code=404, detail="episode not found")
+        return _episode_json(episode)
+
+    @app.get("/api/memory/style")
+    async def list_memory_style(status: str = "") -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        filter_status = None if status in {"", "all"} else status
+        return {"style": [_style_json(item) for item in memory.list_style(status=filter_status)]}
+
+    @app.post("/api/memory/style/{style_id}/confirm")
+    async def confirm_memory_style(style_id: int) -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        term = memory.confirm_style(style_id)
+        if term is None:
+            raise HTTPException(status_code=404, detail="style not found")
+        if term.status != STATUS_CONFIRMED:
+            raise HTTPException(status_code=409, detail="style not confirmed")
+        return _style_json(term)
+
+    @app.post("/api/memory/summarize-session")
+    async def summarize_memory_session(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        body = payload or {}
+        chat_id = body.get("chat_id")
+        if not isinstance(chat_id, str) or not chat_id.strip():
+            chat_id = DEFAULT_CHAT_ID
+        sessions: SessionStore = app.state.sessions
+        turns = sessions.history(chat_id.strip())
+        if not turns:
+            raise HTTPException(status_code=400, detail="session empty")
+        llm = app.state.llm
+        if llm is None:
+            raise HTTPException(status_code=503, detail="llm not ready")
+        try:
+            summary = await summarize_turns(llm, turns)
+        except (ValueError, TypeError, LLMError):
+            logger.exception("summarize failed chat_id=%s", chat_id)
+            raise HTTPException(status_code=502, detail="summarize failed") from None
+        memory: MemoryStore = app.state.memory
+        episode = memory.add_episode(summary, source_chat_id=chat_id, status=STATUS_PENDING)
+        return _episode_json(episode)
 
     @app.get("/")
     async def index() -> FileResponse:
@@ -240,6 +336,29 @@ def _fact_json(fact: Fact) -> dict[str, Any]:
         "status": fact.status,
         "source": fact.source,
         "evidence": fact.evidence,
+    }
+
+
+def _episode_json(episode: Episode) -> dict[str, Any]:
+    return {
+        "id": episode.id,
+        "summary": episode.summary,
+        "happened_at": episode.happened_at,
+        "source_chat_id": episode.source_chat_id,
+        "status": episode.status,
+        "embedding_id": episode.embedding_id,
+    }
+
+
+def _style_json(term: StyleTerm) -> dict[str, Any]:
+    return {
+        "id": term.id,
+        "term": term.term,
+        "meaning": term.meaning,
+        "usage": term.usage,
+        "status": term.status,
+        "evidence": term.evidence,
+        "count": term.count,
     }
 
 

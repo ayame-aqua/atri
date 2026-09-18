@@ -87,6 +87,38 @@ def test_agent_keeps_history_for_next_turn() -> None:
     assert "你好" in user_contents
 
 
+def test_agent_injects_style_and_episode_not_pending(tmp_path: Path) -> None:
+    llm = FakeLLM(
+        [
+            '嗯\n\n[[natsume]]\n{"emotion":"neutral","silent":false,"memory_candidates":[]}',
+            "うん",
+        ]
+    )
+    memory = MemoryStore(
+        tmp_path / "memory.sqlite",
+        seed=False,
+        vector_path=tmp_path / "vectors",
+    )
+    memory.ingest_candidates(
+        [{"key": "relationship", "value": "已婚", "layer": "profile"}],
+        parse_ok=True,
+    )
+    memory.add_style_term("加糖", "事情顺利", usage="随口说", status="confirmed")
+    memory.add_episode("上周说过要早睡", status="active")
+    agent = Agent(
+        persona_path=str(PERSONA),
+        llm=llm,  # type: ignore[arg-type]
+        sessions=SessionStore(max_turns=40),
+        memory=memory,
+    )
+    asyncio.run(agent.run(_inbound("m1", "今晚还早睡吗")))
+    system = llm.calls[0][0]["content"]
+    assert "已婚" not in system
+    assert "加糖" in system
+    assert "早睡" in system
+    assert "不是当前对话" in system
+
+
 def test_agent_absorbs_correction_into_prompt(tmp_path: Path) -> None:
     notes = LivingNotesStore(tmp_path / "living_notes.json")
     llm = FakeLLM(
