@@ -161,6 +161,15 @@ def _attach_runtime(
         app.state.voice = None
 
 
+def _start_asr_warmup(app: FastAPI) -> asyncio.Task[None] | None:
+    asr = getattr(app.state, "asr", None)
+    if asr is None:
+        return None
+    task = asyncio.create_task(asr.warmup())
+    task.add_done_callback(_log_socket_task)
+    return task
+
+
 def _build_llm(config: dict[str, Any]) -> LLMClient:
     llm_cfg = config.get("llm") or {}
     timeout_s = float(llm_cfg.get("timeout_s", 60))
@@ -199,7 +208,12 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
             server_cfg.get("port", 8787),
             app.state.llm_ready,
         )
-        yield
+        warmup = _start_asr_warmup(app)
+        try:
+            yield
+        finally:
+            if warmup is not None:
+                warmup.cancel()
 
     app = FastAPI(title="shiki-natsume", lifespan=lifespan)
     _attach_runtime(
@@ -418,7 +432,7 @@ def _log_socket_task(task: asyncio.Task[None]) -> None:
         return
     exc = task.exception()
     if exc is not None:
-        logger.error("user audio task failed", exc_info=exc)
+        logger.error("background task failed name=%s", task.get_name(), exc_info=exc)
 
 
 def _log_vad_level(payload: dict[str, Any]) -> None:

@@ -53,3 +53,4 @@
 | [v0.47](./v0.47.md) | 修切句卡住：SenseVoice 补 fbank，转写不再堵 WebSocket |
 | [v0.48](./v0.48.md) | 中文转写：强制 zh、加 fsmn-vad、切句加长 |
 | [v0.49](./v0.49.md) | Fun-ASR-Nano；TTS 用实时 AudioContext 播，避免被浏览器拦 |
+| [v0.50](./v0.50.md) | 补 torchaudio：Fun-ASR-Nano 不再每次退回 whisper；启动预热 |

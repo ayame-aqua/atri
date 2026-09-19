@@ -27,6 +27,8 @@ speech = [
     "faster-whisper>=1.1.0",
     "funasr>=1.2.0",
     "kaldi-native-fbank>=1.0.0",
+    # Fun-ASR-Nano 的 forced_align 走 torchaudio，缺了会每次推理抛 ImportError 并退到 whisper。
+    "torchaudio>=2.6.0",
 ]
 
 [build-system]

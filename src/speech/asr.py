@@ -67,6 +67,9 @@ class FunasrAsr:
                 wav_path.unlink(missing_ok=True)
             path.unlink(missing_ok=True)
 
+    async def warmup(self) -> None:
+        await asyncio.to_thread(self._ensure_model)
+
     def _ensure_model(self) -> object:
         if self._model is not None:
             return self._model
@@ -130,6 +133,9 @@ class FasterWhisperAsr:
             return await asyncio.to_thread(self._transcribe_path, model, path)
         finally:
             path.unlink(missing_ok=True)
+
+    async def warmup(self) -> None:
+        await asyncio.to_thread(self._ensure_model)
 
     def _ensure_model(self) -> object:
         if self._model is not None:
@@ -216,6 +222,14 @@ class FallbackAsr:
             logger.exception("asr primary failed, falling back to whisper")
             speech_debug("asr_fallback", to="faster-whisper")
             return await self._fallback.transcribe(audio_bytes, mime)
+
+    async def warmup(self) -> None:
+        """首句之前把权重读进显存。Fun-ASR-Nano 冷启动要几十秒，不能让用户等。"""
+        try:
+            await self._primary.warmup()
+        except AsrError:
+            logger.exception("asr warmup failed model=%s", type(self._primary).__name__)
+            speech_debug("asr_warmup_fail", backend=type(self._primary).__name__)
 
 
 def build_asr(model_name: str = DEFAULT_ASR_MODEL) -> FallbackAsr:

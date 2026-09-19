@@ -19,9 +19,10 @@ const RECORD_MIME_CANDIDATES = [
   "audio/mp4",
 ];
 
-const VAD_MIN_SPEECH_MS = 400;
-const VAD_SILENCE_MS = 800;
-const VAD_MAX_UTTER_MS = 7000;
+const VAD_MIN_SPEECH_MS = 500;
+// 中文句中停顿常在 300~600ms，切太早会把一句话拆成两段喂给 ASR。
+const VAD_SILENCE_MS = 1000;
+const VAD_MAX_UTTER_MS = 10000;
 const VAD_POLL_MS = 40;
 const VAD_TIMESLICE_MS = 200;
 const VAD_SPEECH_HZ_LO = 250;
