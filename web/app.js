@@ -1,7 +1,7 @@
 const messagesEl = document.getElementById("messages");
 const inputEl = document.getElementById("input");
 const sendBtn = document.getElementById("send");
-const recordBtn = document.getElementById("record");
+const liveBtn = document.getElementById("live");
 const statusEl = document.getElementById("status");
 const nameEl = document.getElementById("character-name");
 
@@ -18,12 +18,29 @@ const RECORD_MIME_CANDIDATES = [
   "audio/mp4",
 ];
 
+const VAD_SPEAK_RMS = 0.045;
+const VAD_SILENCE_RMS = 0.022;
+const VAD_MIN_SPEECH_MS = 280;
+const VAD_SILENCE_MS = 800;
+const VAD_MAX_UTTER_MS = 15000;
+const VAD_POLL_MS = 50;
+const ANALYSER_FFT_SIZE = 2048;
+
 let socket = null;
 let busy = false;
 let currentAudio = null;
+let liveMode = false;
+let liveStream = null;
+let audioContext = null;
+let analyser = null;
+let sourceNode = null;
+let vadTimer = null;
 let mediaRecorder = null;
 let recordChunks = [];
-let recordStream = null;
+let sendAfterStop = false;
+let speechStartedAt = 0;
+let silenceStartedAt = 0;
+let utteranceStartedAt = 0;
 
 function isSpeaking() {
   return Boolean(currentAudio && !currentAudio.paused && !currentAudio.ended);
@@ -33,12 +50,17 @@ function isRecording() {
   return mediaRecorder !== null;
 }
 
+function listeningStatus() {
+  return liveMode ? "在听…" : "在线";
+}
+
 function syncComposer() {
   const socketOpen = Boolean(socket && socket.readyState === WebSocket.OPEN);
   sendBtn.disabled = busy || !socketOpen || isRecording();
-  if (recordBtn) {
-    recordBtn.disabled = !socketOpen || busy || isSpeaking();
-    recordBtn.textContent = isRecording() ? "停止" : "录音";
+  if (liveBtn) {
+    liveBtn.disabled = !socketOpen;
+    liveBtn.textContent = liveMode ? "结束" : "对话";
+    liveBtn.classList.toggle("live-on", liveMode);
   }
 }
 
@@ -54,7 +76,7 @@ function playAssistantAudio(url) {
       currentAudio = null;
     }
     if (!busy) {
-      setStatus("在线");
+      setStatus(listeningStatus());
     }
     syncComposer();
   };
@@ -125,63 +147,215 @@ function pickRecordMime() {
   return "";
 }
 
-function stopTracks() {
-  if (!recordStream) {
-    return;
+function currentRms() {
+  if (!analyser) {
+    return 0;
   }
-  for (const track of recordStream.getTracks()) {
-    track.stop();
+  const data = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(data);
+  let sum = 0;
+  for (const sample of data) {
+    const centered = (sample - 128) / 128;
+    sum += centered * centered;
   }
-  recordStream = null;
+  return Math.sqrt(sum / data.length);
 }
 
-async function startRecording() {
-  if (busy || isSpeaking() || isRecording() || !socket || socket.readyState !== WebSocket.OPEN) {
+function stopTracks() {
+  if (!liveStream) {
     return;
   }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setStatus("这个浏览器不能录音");
-    return;
+  for (const track of liveStream.getTracks()) {
+    track.stop();
   }
-  const mime = pickRecordMime();
-  try {
-    recordStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch {
-    setStatus("没有麦克风权限");
+  liveStream = null;
+}
+
+function closeAudioGraph() {
+  if (vadTimer !== null) {
+    window.clearInterval(vadTimer);
+    vadTimer = null;
+  }
+  if (sourceNode) {
+    sourceNode.disconnect();
+    sourceNode = null;
+  }
+  analyser = null;
+  if (audioContext) {
+    void audioContext.close();
+    audioContext = null;
+  }
+}
+
+function resetVadClock() {
+  speechStartedAt = 0;
+  silenceStartedAt = 0;
+  utteranceStartedAt = 0;
+}
+
+function cancelUtterance() {
+  sendAfterStop = false;
+  if (mediaRecorder && mediaRecorder.state !== "inactive") {
+    mediaRecorder.stop();
     return;
   }
   recordChunks = [];
+  resetVadClock();
+}
+
+function stopUtterance() {
+  if (!mediaRecorder || mediaRecorder.state === "inactive") {
+    return;
+  }
+  sendAfterStop = true;
+  mediaRecorder.stop();
+}
+
+function beginUtterance() {
+  if (!liveStream || isRecording() || busy || isSpeaking()) {
+    return;
+  }
+  const mime = pickRecordMime();
+  recordChunks = [];
+  sendAfterStop = true;
   mediaRecorder = mime
-    ? new MediaRecorder(recordStream, { mimeType: mime })
-    : new MediaRecorder(recordStream);
+    ? new MediaRecorder(liveStream, { mimeType: mime })
+    : new MediaRecorder(liveStream);
+  const usedMime = mediaRecorder.mimeType || mime || "audio/webm";
   mediaRecorder.addEventListener("dataavailable", (event) => {
     if (event.data && event.data.size > 0) {
       recordChunks.push(event.data);
     }
   });
   mediaRecorder.addEventListener("stop", () => {
-    const usedMime = mediaRecorder ? mediaRecorder.mimeType : mime;
     mediaRecorder = null;
-    stopTracks();
-    void sendRecording(usedMime || "audio/webm");
-  });
+    const shouldSend = sendAfterStop;
+    sendAfterStop = false;
+    resetVadClock();
+    if (shouldSend) {
+      void sendRecording(usedMime);
+    } else {
+      recordChunks = [];
+      syncComposer();
+    }
+  }, { once: true });
+  utteranceStartedAt = Date.now();
+  silenceStartedAt = 0;
   mediaRecorder.start();
-  setStatus("录音中…");
+  setStatus("在听你说…");
   syncComposer();
 }
 
-function stopRecording() {
-  if (!mediaRecorder) {
+function vadTick() {
+  if (!liveMode || !analyser) {
     return;
   }
-  mediaRecorder.stop();
+  if (busy || isSpeaking()) {
+    if (isRecording()) {
+      cancelUtterance();
+    }
+    resetVadClock();
+    return;
+  }
+  const rms = currentRms();
+  const now = Date.now();
+  if (!isRecording()) {
+    if (rms >= VAD_SPEAK_RMS) {
+      if (!speechStartedAt) {
+        speechStartedAt = now;
+      }
+      if (now - speechStartedAt >= VAD_MIN_SPEECH_MS) {
+        beginUtterance();
+      }
+    } else {
+      speechStartedAt = 0;
+    }
+    return;
+  }
+  if (now - utteranceStartedAt >= VAD_MAX_UTTER_MS) {
+    stopUtterance();
+    return;
+  }
+  if (rms < VAD_SILENCE_RMS) {
+    if (!silenceStartedAt) {
+      silenceStartedAt = now;
+    }
+    if (now - silenceStartedAt >= VAD_SILENCE_MS) {
+      stopUtterance();
+    }
+  } else {
+    silenceStartedAt = 0;
+  }
+}
+
+async function startLive() {
+  if (liveMode || !socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setStatus("这个浏览器不能录音");
+    return;
+  }
+  try {
+    liveStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+    });
+  } catch {
+    setStatus("没有麦克风权限");
+    return;
+  }
+  const Context = window.AudioContext || window.webkitAudioContext;
+  if (!Context) {
+    stopTracks();
+    setStatus("这个浏览器不能实时听");
+    return;
+  }
+  audioContext = new Context();
+  if (audioContext.state === "suspended") {
+    await audioContext.resume();
+  }
+  sourceNode = audioContext.createMediaStreamSource(liveStream);
+  analyser = audioContext.createAnalyser();
+  analyser.fftSize = ANALYSER_FFT_SIZE;
+  sourceNode.connect(analyser);
+  liveMode = true;
+  resetVadClock();
+  vadTimer = window.setInterval(vadTick, VAD_POLL_MS);
+  setStatus("在听…");
+  syncComposer();
+}
+
+function stopLive() {
+  liveMode = false;
+  if (isRecording()) {
+    cancelUtterance();
+  }
+  closeAudioGraph();
+  stopTracks();
+  resetVadClock();
+  if (!busy && !isSpeaking()) {
+    setStatus("在线");
+  }
+  syncComposer();
+}
+
+function toggleLive() {
+  if (liveMode) {
+    stopLive();
+    return;
+  }
+  void startLive();
 }
 
 async function sendRecording(mime) {
   const blob = new Blob(recordChunks, { type: mime });
   recordChunks = [];
   if (!blob.size || !socket || socket.readyState !== WebSocket.OPEN) {
-    setStatus("没听清");
+    if (liveMode) {
+      setStatus("在听…");
+    } else {
+      setStatus("没听清");
+    }
     busy = false;
     syncComposer();
     return;
@@ -198,18 +372,10 @@ async function sendRecording(mime) {
       data_base64: data,
     }));
   } catch {
-    setStatus("录音发送失败");
+    setStatus(liveMode ? "在听…" : "录音发送失败");
     busy = false;
     syncComposer();
   }
-}
-
-function toggleRecord() {
-  if (isRecording()) {
-    stopRecording();
-    return;
-  }
-  void startRecording();
 }
 
 function sendText() {
@@ -229,15 +395,15 @@ function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   socket = new WebSocket(`${proto}://${location.host}/ws/chat`);
   socket.addEventListener("open", () => {
-    setStatus("在线");
+    setStatus(listeningStatus());
     syncComposer();
   });
   socket.addEventListener("close", () => {
+    if (liveMode) {
+      stopLive();
+    }
     setStatus("掉线了，刷新页面");
     busy = false;
-    if (isRecording()) {
-      mediaRecorder.stop();
-    }
     syncComposer();
   });
   socket.addEventListener("message", (event) => {
@@ -254,12 +420,12 @@ function connect() {
       } else if (frame.state === "tts_failed") {
         setStatus("语音合成失败，文字还在");
       } else if (frame.state === "unclear") {
-        setStatus(frame.message || "没听清");
+        setStatus(liveMode ? "在听…" : (frame.message || "没听清"));
       } else if (frame.state === "idle") {
-        if (!isSpeaking()) {
-          setStatus("在线");
-        }
         busy = false;
+        if (!isSpeaking()) {
+          setStatus(listeningStatus());
+        }
         syncComposer();
       }
       return;
@@ -298,8 +464,8 @@ function connect() {
 }
 
 sendBtn.addEventListener("click", sendText);
-if (recordBtn) {
-  recordBtn.addEventListener("click", toggleRecord);
+if (liveBtn) {
+  liveBtn.addEventListener("click", toggleLive);
 }
 inputEl.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
