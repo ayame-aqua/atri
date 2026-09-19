@@ -18,12 +18,19 @@ const RECORD_MIME_CANDIDATES = [
   "audio/mp4",
 ];
 
-const VAD_SPEAK_RMS = 0.045;
-const VAD_SILENCE_RMS = 0.022;
-const VAD_MIN_SPEECH_MS = 280;
-const VAD_SILENCE_MS = 800;
-const VAD_MAX_UTTER_MS = 15000;
-const VAD_POLL_MS = 50;
+const VAD_MIN_SPEECH_MS = 180;
+const VAD_SILENCE_MS = 450;
+const VAD_MAX_UTTER_MS = 7000;
+const VAD_POLL_MS = 40;
+const VAD_TIMESLICE_MS = 200;
+const VAD_SPEECH_HZ_LO = 250;
+const VAD_SPEECH_HZ_HI = 3800;
+const VAD_SPEAK_OVER_FLOOR = 0.06;
+const VAD_SPEAK_RATIO = 2.2;
+const VAD_SILENCE_RATIO = 1.4;
+const VAD_END_PEAK_RATIO = 0.36;
+const VAD_FLOOR_EMA = 0.1;
+const VAD_FLOOR_MIN = 0.01;
 const ANALYSER_FFT_SIZE = 2048;
 
 let socket = null;
@@ -41,6 +48,8 @@ let sendAfterStop = false;
 let speechStartedAt = 0;
 let silenceStartedAt = 0;
 let utteranceStartedAt = 0;
+let noiseFloor = VAD_FLOOR_MIN;
+let peakBand = 0;
 
 function isSpeaking() {
   return Boolean(currentAudio && !currentAudio.paused && !currentAudio.ended);
@@ -147,18 +156,43 @@ function pickRecordMime() {
   return "";
 }
 
-function currentRms() {
-  if (!analyser) {
+function currentBand() {
+  if (!analyser || !audioContext) {
     return 0;
   }
-  const data = new Uint8Array(analyser.fftSize);
-  analyser.getByteTimeDomainData(data);
+  const freq = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(freq);
+  const binHz = audioContext.sampleRate / analyser.fftSize;
+  const low = Math.max(1, Math.floor(VAD_SPEECH_HZ_LO / binHz));
+  const high = Math.min(freq.length - 1, Math.ceil(VAD_SPEECH_HZ_HI / binHz));
   let sum = 0;
-  for (const sample of data) {
-    const centered = (sample - 128) / 128;
-    sum += centered * centered;
+  let count = 0;
+  for (let index = low; index <= high; index += 1) {
+    sum += freq[index];
+    count += 1;
   }
-  return Math.sqrt(sum / data.length);
+  return count ? sum / count / 255 : 0;
+}
+
+function isVoiceOn(band) {
+  const overFloor = Math.max(noiseFloor * VAD_SPEAK_RATIO, noiseFloor + VAD_SPEAK_OVER_FLOOR);
+  return band >= overFloor;
+}
+
+function isVoiceOff(band) {
+  const nearFloor = band <= noiseFloor * VAD_SILENCE_RATIO;
+  const droppedFromPeak = peakBand > 0 && band <= peakBand * VAD_END_PEAK_RATIO;
+  return nearFloor || droppedFromPeak;
+}
+
+function updateNoiseFloor(band) {
+  if (band >= noiseFloor * VAD_SILENCE_RATIO) {
+    return;
+  }
+  noiseFloor = noiseFloor * (1 - VAD_FLOOR_EMA) + band * VAD_FLOOR_EMA;
+  if (noiseFloor < VAD_FLOOR_MIN) {
+    noiseFloor = VAD_FLOOR_MIN;
+  }
 }
 
 function stopTracks() {
@@ -191,6 +225,7 @@ function resetVadClock() {
   speechStartedAt = 0;
   silenceStartedAt = 0;
   utteranceStartedAt = 0;
+  peakBand = 0;
 }
 
 function cancelUtterance() {
@@ -241,7 +276,8 @@ function beginUtterance() {
   }, { once: true });
   utteranceStartedAt = Date.now();
   silenceStartedAt = 0;
-  mediaRecorder.start();
+  peakBand = 0;
+  mediaRecorder.start(VAD_TIMESLICE_MS);
   setStatus("在听你说…");
   syncComposer();
 }
@@ -250,6 +286,9 @@ function vadTick() {
   if (!liveMode || !analyser) {
     return;
   }
+  if (audioContext && audioContext.state === "suspended") {
+    void audioContext.resume();
+  }
   if (busy || isSpeaking()) {
     if (isRecording()) {
       cancelUtterance();
@@ -257,26 +296,31 @@ function vadTick() {
     resetVadClock();
     return;
   }
-  const rms = currentRms();
+  const band = currentBand();
   const now = Date.now();
   if (!isRecording()) {
-    if (rms >= VAD_SPEAK_RMS) {
+    updateNoiseFloor(band);
+    if (isVoiceOn(band)) {
       if (!speechStartedAt) {
         speechStartedAt = now;
       }
       if (now - speechStartedAt >= VAD_MIN_SPEECH_MS) {
         beginUtterance();
+        peakBand = band;
       }
     } else {
       speechStartedAt = 0;
     }
     return;
   }
+  if (band > peakBand) {
+    peakBand = band;
+  }
   if (now - utteranceStartedAt >= VAD_MAX_UTTER_MS) {
     stopUtterance();
     return;
   }
-  if (rms < VAD_SILENCE_RMS) {
+  if (isVoiceOff(band)) {
     if (!silenceStartedAt) {
       silenceStartedAt = now;
     }
@@ -317,8 +361,10 @@ async function startLive() {
   sourceNode = audioContext.createMediaStreamSource(liveStream);
   analyser = audioContext.createAnalyser();
   analyser.fftSize = ANALYSER_FFT_SIZE;
+  analyser.smoothingTimeConstant = 0.35;
   sourceNode.connect(analyser);
   liveMode = true;
+  noiseFloor = VAD_FLOOR_MIN;
   resetVadClock();
   vadTimer = window.setInterval(vadTick, VAD_POLL_MS);
   setStatus("在听…");
