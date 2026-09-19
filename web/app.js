@@ -19,19 +19,21 @@ const RECORD_MIME_CANDIDATES = [
   "audio/mp4",
 ];
 
-const VAD_MIN_SPEECH_MS = 500;
-// 中文句中停顿常在 300~600ms，切太早会把一句话拆成两段喂给 ASR。
-const VAD_SILENCE_MS = 1000;
-const VAD_MAX_UTTER_MS = 10000;
+// 开口即采。旧逻辑要连续 500ms 超过 0.07 才开始录音，「晚上好」这种短句过不了门。
+const VAD_MIN_SPEECH_MS = 200;
+const VAD_SILENCE_MS = 800;
+const VAD_MAX_UTTER_MS = 8000;
+const VAD_EMPTY_RESTART_MS = 2500;
+const VAD_HANGOVER_MS = 240;
 const VAD_POLL_MS = 40;
 const VAD_TIMESLICE_MS = 200;
 const VAD_SPEECH_HZ_LO = 250;
 const VAD_SPEECH_HZ_HI = 3800;
-const VAD_SPEAK_OVER_FLOOR = 0.06;
-const VAD_SPEAK_RATIO = 2.2;
-const VAD_SILENCE_RATIO = 1.4;
+const VAD_SPEAK_OVER_FLOOR = 0.02;
+const VAD_SPEAK_RATIO = 1.6;
+const VAD_SILENCE_RATIO = 1.25;
 const VAD_FLOOR_EMA = 0.1;
-const VAD_FLOOR_MIN = 0.01;
+const VAD_FLOOR_MIN = 0.008;
 const VAD_REPORT_MS = 200;
 const ANALYSER_FFT_SIZE = 2048;
 
@@ -41,15 +43,18 @@ let currentAudio = null;
 let liveMode = false;
 let liveStream = null;
 let audioContext = null;
+let playbackContext = null;
 let analyser = null;
 let sourceNode = null;
+let muteNode = null;
 let vadTimer = null;
 let mediaRecorder = null;
 let recordChunks = [];
 let sendAfterStop = false;
-let speechStartedAt = 0;
 let silenceStartedAt = 0;
 let utteranceStartedAt = 0;
+let lastVoiceAt = 0;
+let voicedMs = 0;
 let noiseFloor = VAD_FLOOR_MIN;
 let peakBand = 0;
 let lastVadReportAt = 0;
@@ -101,6 +106,20 @@ function syncComposer() {
   }
 }
 
+async function ensurePlaybackContext() {
+  const Context = window.AudioContext || window.webkitAudioContext;
+  if (!Context) {
+    return null;
+  }
+  if (!playbackContext || playbackContext.state === "closed") {
+    playbackContext = new Context();
+  }
+  if (playbackContext.state === "suspended") {
+    await playbackContext.resume();
+  }
+  return playbackContext;
+}
+
 function playAssistantAudio(url) {
   void playAssistantAudioAsync(url);
 }
@@ -116,17 +135,15 @@ async function playAssistantAudioAsync(url) {
     }
     syncComposer();
   };
-  if (audioContext) {
+  const playCtx = await ensurePlaybackContext();
+  if (playCtx) {
     try {
-      if (audioContext.state === "suspended") {
-        await audioContext.resume();
-      }
       const response = await fetch(url);
       const raw = await response.arrayBuffer();
-      const decoded = await audioContext.decodeAudioData(raw.slice(0));
-      const source = audioContext.createBufferSource();
+      const decoded = await playCtx.decodeAudioData(raw.slice(0));
+      const source = playCtx.createBufferSource();
       source.buffer = decoded;
-      source.connect(audioContext.destination);
+      source.connect(playCtx.destination);
       source.addEventListener("ended", () => clearIfCurrent(source));
       currentAudio = source;
       source.start();
@@ -214,7 +231,15 @@ function currentBand() {
     sum += freq[index];
     count += 1;
   }
-  return count ? sum / count / 255 : 0;
+  const spectrum = count ? sum / count / 255 : 0;
+  const wave = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(wave);
+  let energy = 0;
+  for (let index = 0; index < wave.length; index += 1) {
+    const centered = (wave[index] - 128) / 128;
+    energy += centered * centered;
+  }
+  return Math.max(spectrum, Math.sqrt(energy / wave.length));
 }
 
 function isVoiceOn(band) {
@@ -296,6 +321,10 @@ function closeAudioGraph() {
     sourceNode.disconnect();
     sourceNode = null;
   }
+  if (muteNode) {
+    muteNode.disconnect();
+    muteNode = null;
+  }
   analyser = null;
   if (audioContext) {
     void audioContext.close();
@@ -304,9 +333,10 @@ function closeAudioGraph() {
 }
 
 function resetVadClock() {
-  speechStartedAt = 0;
   silenceStartedAt = 0;
   utteranceStartedAt = 0;
+  lastVoiceAt = 0;
+  voicedMs = 0;
   peakBand = 0;
 }
 
@@ -364,6 +394,10 @@ function beginUtterance() {
   syncComposer();
 }
 
+function hasUtterance() {
+  return voicedMs >= VAD_MIN_SPEECH_MS || isVoiceOn(peakBand);
+}
+
 function vadTick() {
   if (!liveMode || !analyser) {
     return;
@@ -380,38 +414,42 @@ function vadTick() {
     resetVadClock();
     return;
   }
-  const now = Date.now();
   if (!isRecording()) {
     updateNoiseFloor(band);
-    if (isVoiceOn(band)) {
-      if (!speechStartedAt) {
-        speechStartedAt = now;
-      }
-      if (now - speechStartedAt >= VAD_MIN_SPEECH_MS) {
-        beginUtterance();
-        peakBand = band;
-      }
-    } else {
-      speechStartedAt = 0;
-    }
+    beginUtterance();
     return;
   }
+  const now = Date.now();
   if (band > peakBand) {
     peakBand = band;
   }
-  if (now - utteranceStartedAt >= VAD_MAX_UTTER_MS) {
-    stopUtterance();
-    return;
-  }
-  if (isVoiceOff(band)) {
+  if (isVoiceOn(band)) {
+    lastVoiceAt = now;
+    voicedMs += VAD_POLL_MS;
+    silenceStartedAt = 0;
+  } else if (lastVoiceAt && now - lastVoiceAt < VAD_HANGOVER_MS) {
+    silenceStartedAt = 0;
+  } else {
+    updateNoiseFloor(band);
     if (!silenceStartedAt) {
       silenceStartedAt = now;
     }
-    if (now - silenceStartedAt >= VAD_SILENCE_MS) {
+    const silentFor = now - silenceStartedAt;
+    if (hasUtterance() && silentFor >= VAD_SILENCE_MS) {
       stopUtterance();
+      return;
     }
-  } else {
-    silenceStartedAt = 0;
+    if (!hasUtterance() && silentFor >= VAD_EMPTY_RESTART_MS) {
+      cancelUtterance();
+      return;
+    }
+  }
+  if (now - utteranceStartedAt >= VAD_MAX_UTTER_MS) {
+    if (hasUtterance()) {
+      stopUtterance();
+    } else {
+      cancelUtterance();
+    }
   }
 }
 
@@ -425,7 +463,11 @@ async function startLive() {
   }
   try {
     liveStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: false,
+        autoGainControl: true,
+      },
     });
   } catch {
     setStatus("没有麦克风权限");
@@ -441,15 +483,22 @@ async function startLive() {
   if (audioContext.state === "suspended") {
     await audioContext.resume();
   }
+  await ensurePlaybackContext();
   sourceNode = audioContext.createMediaStreamSource(liveStream);
   analyser = audioContext.createAnalyser();
   analyser.fftSize = ANALYSER_FFT_SIZE;
   analyser.smoothingTimeConstant = 0.35;
+  // Chrome 上 Analyser 不接到 destination 时 getByteFrequencyData 经常全 0。
+  muteNode = audioContext.createGain();
+  muteNode.gain.value = 0;
   sourceNode.connect(analyser);
+  analyser.connect(muteNode);
+  muteNode.connect(audioContext.destination);
   liveMode = true;
   noiseFloor = VAD_FLOOR_MIN;
   resetVadClock();
   vadTimer = window.setInterval(vadTick, VAD_POLL_MS);
+  beginUtterance();
   setStatus("在听…");
   syncComposer();
 }

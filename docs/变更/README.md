@@ -54,3 +54,4 @@
 | [v0.48](./v0.48.md) | 中文转写：强制 zh、加 fsmn-vad、切句加长 |
 | [v0.49](./v0.49.md) | Fun-ASR-Nano；TTS 用实时 AudioContext 播，避免被浏览器拦 |
 | [v0.50](./v0.50.md) | 补 torchaudio：Fun-ASR-Nano 不再每次退回 whisper；启动预热 |
+| [v0.51](./v0.51.md) | 开口即采：短句不再等 500ms 过线才录音 |
