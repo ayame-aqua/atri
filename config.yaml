@@ -29,7 +29,7 @@ llm:
   disable_thinking: true
 
 speech:
-  # P3-A：本机 GPT-SoVITS api_v2；权重不进仓库。P3-B/C：SenseVoice-Small，失败再 Faster-Whisper large-v3。
+  # P3-A：本机 GPT-SoVITS api_v2。P3-B/C：Fun-ASR-Nano + fsmn-vad，失败再 Faster-Whisper small。
   tts_api_base: http://127.0.0.1:9880
   tts_text_lang: ja
   tts_timeout_s: 60
@@ -37,7 +37,7 @@ speech:
   tts_cache_dir: data/tts_cache
   tts_gpt_weights: data/natsume/weights/natsume-e15.ckpt
   tts_sovits_weights: data/natsume/weights/natsume_e8_s1104.pth
-  asr_model: sensevoice-small
+  asr_model: fun-asr-nano
 
 channels:
   web:

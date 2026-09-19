@@ -54,7 +54,32 @@ let peakBand = 0;
 let lastVadReportAt = 0;
 
 function isSpeaking() {
-  return Boolean(currentAudio && !currentAudio.paused && !currentAudio.ended);
+  if (!currentAudio) {
+    return false;
+  }
+  if (typeof currentAudio.paused === "boolean") {
+    return !currentAudio.paused && !currentAudio.ended;
+  }
+  return true;
+}
+
+function stopCurrentAudio() {
+  if (!currentAudio) {
+    return;
+  }
+  const handle = currentAudio;
+  currentAudio = null;
+  if (typeof handle.pause === "function") {
+    handle.pause();
+    return;
+  }
+  if (typeof handle.stop === "function") {
+    try {
+      handle.stop();
+    } catch {
+      // already stopped
+    }
+  }
 }
 
 function isRecording() {
@@ -76,14 +101,13 @@ function syncComposer() {
 }
 
 function playAssistantAudio(url) {
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio = null;
-  }
-  const audio = new Audio(url);
-  currentAudio = audio;
-  const clearIfCurrent = () => {
-    if (currentAudio === audio) {
+  void playAssistantAudioAsync(url);
+}
+
+async function playAssistantAudioAsync(url) {
+  stopCurrentAudio();
+  const clearIfCurrent = (handle) => {
+    if (currentAudio === handle) {
       currentAudio = null;
     }
     if (!busy) {
@@ -91,22 +115,38 @@ function playAssistantAudio(url) {
     }
     syncComposer();
   };
-  audio.addEventListener("ended", clearIfCurrent);
-  audio.addEventListener("pause", () => {
-    if (audio.ended) {
-      return;
-    }
-    syncComposer();
-  });
-  audio.play()
-    .then(() => {
+  if (audioContext) {
+    try {
+      if (audioContext.state === "suspended") {
+        await audioContext.resume();
+      }
+      const response = await fetch(url);
+      const raw = await response.arrayBuffer();
+      const decoded = await audioContext.decodeAudioData(raw.slice(0));
+      const source = audioContext.createBufferSource();
+      source.buffer = decoded;
+      source.connect(audioContext.destination);
+      source.addEventListener("ended", () => clearIfCurrent(source));
+      currentAudio = source;
+      source.start();
       setStatus("她在说话");
       syncComposer();
-    })
-    .catch(() => {
-      setStatus("语音播放失败");
-      clearIfCurrent();
-    });
+      return;
+    } catch {
+      stopCurrentAudio();
+    }
+  }
+  const audio = new Audio(url);
+  currentAudio = audio;
+  audio.addEventListener("ended", () => clearIfCurrent(audio));
+  try {
+    await audio.play();
+    setStatus("她在说话");
+    syncComposer();
+  } catch {
+    setStatus("语音播放失败");
+    clearIfCurrent(audio);
+  }
 }
 
 function setStatus(text) {

@@ -19,6 +19,7 @@ from src.speech.constants import (
     ASR_NO_SPEECH_MAX,
     ASR_WAV_RATE,
     DEFAULT_ASR_MODEL,
+    FUNASR_NANO_ID,
     SENSEVOICE_LANGUAGE,
     SENSEVOICE_MODEL_ID,
     SENSEVOICE_VAD_MAX_MS,
@@ -45,8 +46,10 @@ class AsrError(Exception):
     """转写失败。调用方按没听清处理，不得写记忆。"""
 
 
-class SenseVoiceAsr:
-    def __init__(self, model_id: str = SENSEVOICE_MODEL_ID) -> None:
+class FunasrAsr:
+    """FaustBot 同路：Fun-ASR-Nano + fsmn-vad。"""
+
+    def __init__(self, model_id: str = FUNASR_NANO_ID) -> None:
         self._model_id = model_id
         self._model: object | None = None
 
@@ -73,39 +76,43 @@ class SenseVoiceAsr:
             msg = "funasr is not installed"
             raise AsrError(msg) from exc
         device = _torch_device()
-        logger.info("asr loading model=sensevoice-small device=%s", device)
-        speech_debug("asr_load", backend="sensevoice", device=device)
+        logger.info("asr loading model=%s device=%s", self._model_id, device)
+        speech_debug("asr_load", backend="funasr", model=self._model_id, device=device)
         try:
             self._model = AutoModel(
                 model=self._model_id,
+                trust_remote_code=True,
                 vad_model=SENSEVOICE_VAD_MODEL,
                 vad_kwargs={"max_single_segment_time": SENSEVOICE_VAD_MAX_MS},
                 device=device,
                 disable_update=True,
             )
         except Exception as exc:
-            msg = "sensevoice load failed"
+            msg = "funasr load failed"
             raise AsrError(msg) from exc
         return self._model
 
     def _transcribe_path(self, model: object, path: Path) -> str:
         generate = getattr(model, "generate", None)
         if generate is None:
-            msg = "sensevoice missing generate"
+            msg = "funasr missing generate"
             raise AsrError(msg)
         try:
-            raw = generate(
-                input=str(path),
-                cache={},
-                language=SENSEVOICE_LANGUAGE,
-                use_itn=True,
-                batch_size_s=60,
-            )
+            try:
+                raw = generate(
+                    input=str(path),
+                    cache={},
+                    language=SENSEVOICE_LANGUAGE,
+                    use_itn=True,
+                    batch_size_s=60,
+                )
+            except TypeError:
+                raw = generate(input=str(path), cache={})
         except Exception as exc:
-            msg = "sensevoice infer failed"
+            msg = "funasr infer failed"
             raise AsrError(msg) from exc
         text = _sensevoice_text(raw)
-        speech_debug("asr_text", backend="sensevoice", text=text)
+        speech_debug("asr_text", backend="funasr", text=text)
         return text
 
 
@@ -186,12 +193,15 @@ class FasterWhisperAsr:
 
 
 class FallbackAsr:
-    """先 SenseVoice，装不上再 Faster-Whisper。"""
+    """先 Fun-ASR-Nano，装不上再 Faster-Whisper。"""
 
     def __init__(self, model_name: str = DEFAULT_ASR_MODEL) -> None:
-        self._primary: SenseVoiceAsr | FasterWhisperAsr
-        if _wants_sensevoice(model_name):
-            self._primary = SenseVoiceAsr()
+        self._primary: FunasrAsr | FasterWhisperAsr
+        if _wants_funasr(model_name):
+            model_id = FUNASR_NANO_ID
+            if "sensevoice" in (model_name or "").strip().lower():
+                model_id = SENSEVOICE_MODEL_ID
+            self._primary = FunasrAsr(model_id)
             self._fallback: FasterWhisperAsr | None = FasterWhisperAsr(WHISPER_FALLBACK_SIZE)
         else:
             self._primary = FasterWhisperAsr(model_name)
@@ -216,8 +226,10 @@ def asr_model_size(name: str) -> str:
     raw = (name or "").strip().lower()
     if raw.startswith(ASR_MODEL_PREFIX):
         raw = raw[len(ASR_MODEL_PREFIX) :]
-    if _wants_sensevoice(raw):
-        return "sensevoice-small"
+    if _wants_funasr(raw):
+        if "sensevoice" in raw:
+            return "sensevoice-small"
+        return "fun-asr-nano"
     return raw or WHISPER_FALLBACK_SIZE
 
 
@@ -280,9 +292,9 @@ def _suffix_for_mime(mime: str) -> str:
     return _MIME_SUFFIX.get(raw, ".webm")
 
 
-def _wants_sensevoice(name: str) -> bool:
+def _wants_funasr(name: str) -> bool:
     raw = (name or "").strip().lower()
-    return "sensevoice" in raw or raw in {"funasr", "paraformer"}
+    return any(token in raw for token in ("sensevoice", "funasr", "fun-asr", "nano", "paraformer"))
 
 
 def _sensevoice_text(raw: object) -> str:

@@ -52,3 +52,4 @@
 | [v0.46](./v0.46.md) | P3-B：SenseVoice-Small；实时语音落本机日志 |
 | [v0.47](./v0.47.md) | 修切句卡住：SenseVoice 补 fbank，转写不再堵 WebSocket |
 | [v0.48](./v0.48.md) | 中文转写：强制 zh、加 fsmn-vad、切句加长 |
+| [v0.49](./v0.49.md) | Fun-ASR-Nano；TTS 用实时 AudioContext 播，避免被浏览器拦 |

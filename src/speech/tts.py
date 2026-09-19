@@ -77,6 +77,7 @@ class SoVitsTts:
         audio_id = _audio_id(speech, emotion)
         path = self._cache_dir / f"{audio_id}.{TTS_MEDIA_TYPE}"
         if path.is_file() and path.stat().st_size > WAV_HEADER_SIZE:
+            logger.info("tts cache hit audio_id=%s emotion=%s", audio_id, emotion)
             return CachedClip(audio_id=audio_id, path=path, duration_ms=_wav_duration_ms(path))
         started = time.monotonic()
         wav = await self._request_wav(speech, emotion)

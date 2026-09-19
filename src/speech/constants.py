@@ -19,8 +19,9 @@ ERROR_BODY_MAX = 500
 SAD_FALLBACK_EMOTION = "neutral"
 PROMPTS_FILE = "prompts.json"
 
-DEFAULT_ASR_MODEL = "sensevoice-small"
+DEFAULT_ASR_MODEL = "fun-asr-nano"
 SENSEVOICE_MODEL_ID = "iic/SenseVoiceSmall"
+FUNASR_NANO_ID = "FunAudioLLM/Fun-ASR-Nano-2512"
 SENSEVOICE_LANGUAGE = "zh"
 SENSEVOICE_VAD_MODEL = "fsmn-vad"
 SENSEVOICE_VAD_MAX_MS = 30000

@@ -504,8 +504,8 @@ async def _run_inbound(
     if result.replay:
         await websocket.send_json({"type": "duplicate", "message_id": inbound.message_id})
     await websocket.send_json(assistant_text_frame(result.outbound))
-    await websocket.send_json({"type": "status", "message_id": inbound.message_id, "state": "idle"})
     await _send_assistant_audio(websocket, result.outbound)
+    await websocket.send_json({"type": "status", "message_id": inbound.message_id, "state": "idle"})
 
 
 async def _send_assistant_audio(websocket: WebSocket, outbound: OutboundMessage) -> None:

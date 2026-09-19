@@ -11,12 +11,13 @@ def test_asr_model_size_strips_prefix() -> None:
     assert asr_model_size("faster-whisper-small") == "small"
     assert asr_model_size("base") == "base"
     assert asr_model_size("sensevoice-small") == "sensevoice-small"
-    assert asr_model_size("funasr") == "sensevoice-small"
+    assert asr_model_size("fun-asr-nano") == "fun-asr-nano"
+    assert asr_model_size("funasr") == "fun-asr-nano"
 
 
-def test_build_asr_prefers_sensevoice() -> None:
-    asr = build_asr("sensevoice-small")
-    assert asr._primary.__class__.__name__ == "SenseVoiceAsr"
+def test_build_asr_prefers_funasr() -> None:
+    asr = build_asr("fun-asr-nano")
+    assert asr._primary.__class__.__name__ == "FunasrAsr"
     assert asr._fallback is not None
     assert asr._primary._model is None
 
