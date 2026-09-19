@@ -11,6 +11,13 @@ memory:
   vector_path: data/vectors
   retrieve_k: 5
   style_max: 8
+  extract_every_n: 8
+  episode_min_score: 0.35
+  diary_keep: 5
+  mood:
+    enabled: true
+    decay_per_hour: 0.05
+    cycle_enabled: false
 
 gateway:
   dedup_ttl_s: 600

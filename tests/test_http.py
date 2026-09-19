@@ -78,6 +78,26 @@ def test_tts_media_serves_cached(tmp_path: Path) -> None:
     assert response.content[:4] == b"RIFF"
 
 
+def test_memory_mood_and_export(tmp_path: Path) -> None:
+    sqlite = tmp_path / "memory.sqlite"
+    vectors = tmp_path / "vectors"
+    MemoryStore(sqlite, seed=True, vector_path=vectors)
+    settings = load_config()
+    memory_cfg = dict(settings.get("memory") or {})
+    memory_cfg["sqlite_path"] = str(sqlite)
+    memory_cfg["vector_path"] = str(vectors)
+    settings["memory"] = memory_cfg
+    client = TestClient(create_app(settings))
+    mood = client.get("/api/memory/mood")
+    assert mood.status_code == 200
+    body = mood.json()
+    assert body["cycle_enabled"] is False
+    assert "energy" in body
+    exported = client.post("/api/memory/export")
+    assert exported.status_code == 200
+    assert exported.json()["path"].endswith("export.md")
+
+
 def test_summarize_empty_session() -> None:
     client = TestClient(create_app())
     response = client.post("/api/memory/summarize-session", json={"chat_id": "web:local"})

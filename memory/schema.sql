@@ -46,3 +46,32 @@ CREATE TABLE IF NOT EXISTS style_terms (
 );
 
 CREATE INDEX IF NOT EXISTS idx_style_terms_status ON style_terms(status);
+
+-- P2-C：日记、核心印象、相处状态。只追加，不改上面的列。
+CREATE TABLE IF NOT EXISTS diaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    day TEXT NOT NULL UNIQUE,
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_diaries_day ON diaries(day);
+
+CREATE TABLE IF NOT EXISTS impressions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    source TEXT NOT NULL DEFAULT 'extract',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    CHECK (status IN ('active', 'pending', 'archived'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_impressions_status ON impressions(status);
+
+CREATE TABLE IF NOT EXISTS mood_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    energy REAL NOT NULL DEFAULT 0,
+    irritation REAL NOT NULL DEFAULT 0,
+    affection REAL NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

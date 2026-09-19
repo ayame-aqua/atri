@@ -19,7 +19,8 @@ from src.core.session import SessionStore, Turn
 from src.core.text_style import soften_chinese_punctuation
 from src.core.translate import chinese_to_japanese
 from src.core.types import InboundMessage, OutboundMessage
-from src.memory.constants import RECENT_TURNS_FOR_RETRIEVE
+from src.memory.constants import DEFAULT_EXTRACT_EVERY_N, RECENT_TURNS_FOR_RETRIEVE
+from src.memory.extract import extract_pending
 from src.memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -38,12 +39,14 @@ class Agent:
         sessions: SessionStore,
         memory: MemoryStore | None = None,
         living_notes: LivingNotesStore | None = None,
+        extract_every_n: int = DEFAULT_EXTRACT_EVERY_N,
     ) -> None:
         self._persona_path = persona_path
         self._llm = llm
         self._sessions = sessions
         self._memory = memory or MemoryStore()
         self._living_notes = living_notes
+        self._extract_every_n = max(0, int(extract_every_n))
 
     async def run(self, inbound: InboundMessage) -> OutboundMessage:
         if self._living_notes is not None and looks_like_correction(inbound.text):
@@ -54,17 +57,27 @@ class Agent:
                 last_reply=self._last_assistant(inbound.chat_id),
             )
         self._memory.apply_user_text(inbound.text)
+        self._memory.apply_mood_from_text(inbound.text)
         persona = load_persona(self._persona_path)
         profile = self._memory.profile_block()
+        impression = self._memory.impression_block()
+        mood = self._memory.mood_prompt_block()
         style = self._memory.style_block()
+        diaries = self._memory.diary_block()
         recent = self._sessions.history(inbound.chat_id)
         recent_text = " ".join(turn.text for turn in recent[-RECENT_TURNS_FOR_RETRIEVE:])
         episodes = self._memory.episodes_block(inbound.text, extra=recent_text)
         system_parts = [persona]
         if profile:
             system_parts.append("核心事实：\n" + profile)
+        if impression:
+            system_parts.append(impression)
+        if mood:
+            system_parts.append(mood)
         if style:
             system_parts.append(style)
+        if diaries:
+            system_parts.append(diaries)
         if episodes:
             system_parts.append(episodes)
         system_parts.extend([WEB_CHANNEL_RULES, SCENARIO, CONSTANT_FACTS])
@@ -119,7 +132,21 @@ class Agent:
                 speech_ja=speech_ja or None,
             ),
         )
+        await self._maybe_extract(inbound.chat_id)
         return outbound
+
+    async def _maybe_extract(self, chat_id: str) -> None:
+        if self._extract_every_n <= 0:
+            return
+        history = self._sessions.history(chat_id)
+        user_n = sum(1 for turn in history if turn.role == "user")
+        if user_n == 0 or user_n % self._extract_every_n != 0:
+            return
+        window = history[-self._extract_every_n * 2 :]
+        try:
+            await extract_pending(self._llm, self._memory, window, chat_id=chat_id)
+        except Exception:
+            logger.exception("memory extract failed chat_id=%s", chat_id)
 
     def _last_assistant(self, chat_id: str) -> str:
         for turn in reversed(self._sessions.history(chat_id)):

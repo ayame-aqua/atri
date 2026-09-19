@@ -26,6 +26,11 @@ from src.core.types import OutboundMessage
 from src.gateway import Gateway
 from src.memory.constants import (
     DEFAULT_CHAT_ID,
+    DEFAULT_CYCLE_ENABLED,
+    DEFAULT_DIARY_KEEP,
+    DEFAULT_EPISODE_MIN_SCORE,
+    DEFAULT_EXTRACT_EVERY_N,
+    DEFAULT_MOOD_DECAY_PER_HOUR,
     DEFAULT_RETRIEVE_K,
     DEFAULT_STYLE_MAX,
     STATUS_ACTIVE,
@@ -33,7 +38,7 @@ from src.memory.constants import (
     STATUS_PENDING,
     VECTOR_BACKEND_LANCEDB,
 )
-from src.memory.store import Episode, Fact, MemoryStore, StyleTerm
+from src.memory.store import Diary, Episode, Fact, Impression, MemoryStore, StyleTerm
 from src.memory.summarize import summarize_turns
 from src.speech.constants import (
     DEFAULT_CACHE_DIR,
@@ -74,12 +79,21 @@ def _attach_runtime(
         logger.warning("memory vector_backend=%s unsupported, using lancedb", backend)
     retrieve_k = int(memory_cfg.get("retrieve_k", DEFAULT_RETRIEVE_K))
     style_max = int(memory_cfg.get("style_max", DEFAULT_STYLE_MAX))
+    min_score = float(memory_cfg.get("episode_min_score", DEFAULT_EPISODE_MIN_SCORE))
+    extract_every_n = int(memory_cfg.get("extract_every_n", DEFAULT_EXTRACT_EVERY_N))
+    diary_keep = int(memory_cfg.get("diary_keep", DEFAULT_DIARY_KEEP))
+    mood_cfg = memory_cfg.get("mood") or {}
     memory = MemoryStore(
         sqlite_path,
         seed=True,
         vector_path=vector_path,
         retrieve_k=retrieve_k,
         style_max=style_max,
+        min_score=min_score,
+        mood_enabled=bool(mood_cfg.get("enabled", True)),
+        mood_decay_per_hour=float(mood_cfg.get("decay_per_hour", DEFAULT_MOOD_DECAY_PER_HOUR)),
+        cycle_enabled=bool(mood_cfg.get("cycle_enabled", DEFAULT_CYCLE_ENABLED)),
+        diary_keep=diary_keep,
     )
     living_notes = LivingNotesStore(REPO_ROOT / "data" / "living_notes.json")
     agent = (
@@ -89,6 +103,7 @@ def _attach_runtime(
             sessions=sessions,
             memory=memory,
             living_notes=living_notes,
+            extract_every_n=extract_every_n,
         )
         if llm is not None
         else None
@@ -290,7 +305,34 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
             raise HTTPException(status_code=502, detail="summarize failed") from None
         memory: MemoryStore = app.state.memory
         episode = memory.add_episode(summary, source_chat_id=chat_id, status=STATUS_PENDING)
-        return _episode_json(episode)
+        diary = memory.upsert_diary(summary)
+        return {"episode": _episode_json(episode), "diary": _diary_json(diary)}
+
+    @app.get("/api/memory/mood")
+    async def get_memory_mood() -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        mood = memory.get_mood()
+        return {
+            "energy": mood.energy,
+            "irritation": mood.irritation,
+            "affection": mood.affection,
+            "cycle_enabled": memory.cycle_enabled,
+        }
+
+    @app.post("/api/memory/impressions/{impression_id}/confirm")
+    async def confirm_memory_impression(impression_id: int) -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        row = memory.update_impression(impression_id, status=STATUS_ACTIVE)
+        if row is None:
+            raise HTTPException(status_code=404, detail="impression not found")
+        return _impression_json(row)
+
+    @app.post("/api/memory/export")
+    async def export_memory() -> dict[str, Any]:
+        memory: MemoryStore = app.state.memory
+        dest = REPO_ROOT / "data" / "memory" / "export.md"
+        path = memory.export_markdown(dest)
+        return {"path": str(path)}
 
     @app.get("/")
     async def index() -> FileResponse:
@@ -431,6 +473,19 @@ def _style_json(term: StyleTerm) -> dict[str, Any]:
         "status": term.status,
         "evidence": term.evidence,
         "count": term.count,
+    }
+
+
+def _diary_json(row: Diary) -> dict[str, Any]:
+    return {"id": row.id, "day": row.day, "summary": row.summary}
+
+
+def _impression_json(row: Impression) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "text": row.text,
+        "status": row.status,
+        "source": row.source,
     }
 
 

@@ -13,6 +13,10 @@ from typing import Any
 from src.config import REPO_ROOT
 from src.memory.constants import (
     DEFAULT_CHAT_ID,
+    DEFAULT_CYCLE_ENABLED,
+    DEFAULT_DIARY_KEEP,
+    DEFAULT_EPISODE_MIN_SCORE,
+    DEFAULT_MOOD_DECAY_PER_HOUR,
     DEFAULT_RETRIEVE_K,
     DEFAULT_STYLE_MAX,
     EPISODE_LAYERS,
@@ -32,6 +36,7 @@ from src.memory.constants import (
     STYLE_LAYERS,
 )
 from src.memory.embedder import embed_text
+from src.memory.mood import MoodState, clamp_mood, decay_mood, mood_block, mood_delta_from_text
 from src.memory.vectors import EpisodeIndex, embedding_id_for
 
 logger = logging.getLogger(__name__)
@@ -86,6 +91,29 @@ class StyleTerm:
     count: int
 
 
+@dataclass(frozen=True)
+class Diary:
+    id: int
+    day: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class Impression:
+    id: int
+    text: str
+    status: str
+    source: str
+
+
+@dataclass(frozen=True)
+class SearchHit:
+    kind: str
+    score: float
+    fact: Fact | None = None
+    episode: Episode | None = None
+
+
 class MemoryStore:
     def __init__(
         self,
@@ -95,16 +123,32 @@ class MemoryStore:
         vector_path: Path | str | None = None,
         retrieve_k: int = DEFAULT_RETRIEVE_K,
         style_max: int = DEFAULT_STYLE_MAX,
+        min_score: float = DEFAULT_EPISODE_MIN_SCORE,
+        mood_enabled: bool = True,
+        mood_decay_per_hour: float = DEFAULT_MOOD_DECAY_PER_HOUR,
+        cycle_enabled: bool = DEFAULT_CYCLE_ENABLED,
+        diary_keep: int = DEFAULT_DIARY_KEEP,
     ) -> None:
         self._path = path
         self._seed = seed
         self._conn: sqlite3.Connection | None = None
         self._retrieve_k = _clamp_k(retrieve_k)
         self._style_max = max(1, int(style_max))
+        self._min_score = max(0.0, min(1.0, float(min_score)))
+        self._mood_enabled = bool(mood_enabled)
+        self._mood_decay_per_hour = max(0.0, float(mood_decay_per_hour))
+        if cycle_enabled:
+            logger.info("memory cycle_enabled requested but locked off for P2-C")
+        self._cycle_enabled = False
+        self._diary_keep = max(1, int(diary_keep))
         self._index = EpisodeIndex(vector_path) if vector_path is not None else None
         self._ensure_schema()
         if seed:
             self._seed_defaults()
+
+    @property
+    def cycle_enabled(self) -> bool:
+        return self._cycle_enabled
 
     def profile_block(self) -> str:
         rows = self.list_facts(status=STATUS_ACTIVE)
@@ -142,15 +186,27 @@ class MemoryStore:
         found: list[Episode] = []
         seen: set[int] = set()
         for hit in hits:
-            if hit.episode_id in seen:
-                continue
             episode = self.get_episode(hit.episode_id)
             if episode is None or episode.status != STATUS_ACTIVE:
+                continue
+            if hit.episode_id in seen:
+                continue
+            if hit.score < self._min_score and not _text_overlap(query, episode.summary):
                 continue
             seen.add(episode.id)
             found.append(episode)
             if len(found) >= limit:
                 break
+        if len(found) < limit:
+            for episode in self.list_episodes(status=STATUS_ACTIVE):
+                if episode.id in seen:
+                    continue
+                if not _text_overlap(query, episode.summary):
+                    continue
+                seen.add(episode.id)
+                found.append(episode)
+                if len(found) >= limit:
+                    break
         return found
 
     def add_fact(
@@ -517,6 +573,286 @@ class MemoryStore:
     def confirm_style(self, style_id: int) -> StyleTerm | None:
         return self.update_style(style_id, status=STATUS_CONFIRMED)
 
+    def add(
+        self,
+        content: str,
+        *,
+        layer: str = LAYER_PROFILE,
+        key: str | None = None,
+        status: str = STATUS_PENDING,
+        source: str = SOURCE_EXTRACT,
+        evidence: str | None = None,
+    ) -> Fact | Episode | Impression:
+        """mem0 式写入。profile/episode/impression；未确认默认 pending。"""
+        text = (content or "").strip()
+        if not text:
+            msg = "memory add requires content"
+            raise ValueError(msg)
+        if layer in EPISODE_LAYERS:
+            return self.add_episode(text, status=status)
+        if layer in {"impression", "core"}:
+            return self.set_impression(text, status=status, source=source)
+        fact_key = (key or "").strip() or _remember_key(text)
+        return self.add_fact(
+            fact_key,
+            text,
+            category=_category_for_key(fact_key),
+            source=source,
+            evidence=evidence,
+            overwrite=False,
+            status=status,
+        )
+
+    def search(self, query: str, *, k: int | None = None) -> list[SearchHit]:
+        needle = (query or "").strip()
+        if not needle:
+            return []
+        hits: list[SearchHit] = []
+        for fact in self.list_facts(status=STATUS_ACTIVE):
+            if needle in fact.key or needle in fact.value:
+                hits.append(SearchHit(kind="fact", score=1.0, fact=fact))
+        if self._index is not None:
+            limit = _clamp_k(k or self._retrieve_k)
+            raw = self._index.search(embed_text(needle), k=max(limit * 3, RETRIEVE_K_MAX))
+            for item in raw:
+                episode = self.get_episode(item.episode_id)
+                if episode is None or episode.status != STATUS_ACTIVE:
+                    continue
+                if item.score < self._min_score and not _text_overlap(needle, episode.summary):
+                    continue
+                hits.append(SearchHit(kind="episode", score=item.score, episode=episode))
+            if not any(hit.kind == "episode" for hit in hits):
+                for episode in self.list_episodes(status=STATUS_ACTIVE):
+                    if _text_overlap(needle, episode.summary):
+                        hits.append(SearchHit(kind="episode", score=1.0, episode=episode))
+        hits.sort(key=lambda hit: hit.score, reverse=True)
+        return hits
+
+    def update(
+        self,
+        memory_id: int,
+        *,
+        kind: str = LAYER_PROFILE,
+        value: str | None = None,
+        status: str | None = None,
+    ) -> Fact | Episode | Impression | None:
+        if kind in EPISODE_LAYERS:
+            return self.update_episode(memory_id, status=status, summary=value)
+        if kind in {"impression", "core"}:
+            return self.update_impression(memory_id, text=value, status=status)
+        return self.update_fact(memory_id, value=value, status=status)
+
+    def impression_block(self) -> str:
+        row = self.active_impression()
+        if row is None:
+            return ""
+        return "核心印象（她对你的稳定看法，不是刚才这句）：\n- " + row.text
+
+    def active_impression(self) -> Impression | None:
+        with self._session() as conn:
+            row = conn.execute(
+                "SELECT id, text, status, source FROM impressions "
+                "WHERE status = ? ORDER BY updated_at DESC, id DESC LIMIT 1",
+                (STATUS_ACTIVE,),
+            ).fetchone()
+        return None if row is None else _impression(row)
+
+    def set_impression(
+        self,
+        text: str,
+        *,
+        status: str = STATUS_PENDING,
+        source: str = SOURCE_EXTRACT,
+    ) -> Impression:
+        body = (text or "").strip()
+        if not body:
+            msg = "impression text required"
+            raise ValueError(msg)
+        write_status = _fact_status(status)
+        with self._session() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO impressions (text, status, source, updated_at)
+                VALUES (?, ?, ?, datetime('now'))
+                """,
+                (body, write_status, source),
+            )
+            impression_id = int(cursor.lastrowid)
+            conn.commit()
+        row = self.get_impression(impression_id)
+        if row is None:
+            msg = "impression write failed"
+            raise RuntimeError(msg)
+        logger.info("memory impression id=%s status=%s", row.id, row.status)
+        return row
+
+    def get_impression(self, impression_id: int) -> Impression | None:
+        with self._session() as conn:
+            row = conn.execute(
+                "SELECT id, text, status, source FROM impressions WHERE id = ?",
+                (impression_id,),
+            ).fetchone()
+        return None if row is None else _impression(row)
+
+    def update_impression(
+        self,
+        impression_id: int,
+        *,
+        text: str | None = None,
+        status: str | None = None,
+    ) -> Impression | None:
+        current = self.get_impression(impression_id)
+        if current is None:
+            return None
+        new_text = current.text if text is None else text.strip()
+        new_status = current.status if status is None else _fact_status(status)
+        with self._session() as conn:
+            conn.execute(
+                "UPDATE impressions SET text = ?, status = ?, updated_at = datetime('now') "
+                "WHERE id = ?",
+                (new_text, new_status, impression_id),
+            )
+            conn.commit()
+        return self.get_impression(impression_id)
+
+    def diary_block(self) -> str:
+        rows = self.list_diaries(limit=self._diary_keep)
+        if not rows:
+            return ""
+        lines = [f"- {row.day}：{row.summary}" for row in rows]
+        return "最近日记（日记，不是此刻对话）：\n" + "\n".join(lines)
+
+    def list_diaries(self, limit: int | None = None) -> list[Diary]:
+        cap = self._diary_keep if limit is None else max(1, int(limit))
+        with self._session() as conn:
+            cursor = conn.execute(
+                "SELECT id, day, summary FROM diaries ORDER BY day DESC LIMIT ?",
+                (cap,),
+            )
+            return [_diary(row) for row in cursor.fetchall()]
+
+    def upsert_diary(self, summary: str, *, day: str | None = None) -> Diary:
+        text = (summary or "").strip()
+        if not text:
+            msg = "diary summary required"
+            raise ValueError(msg)
+        with self._session() as conn:
+            when = day or str(conn.execute("SELECT date('now')").fetchone()[0])
+            conn.execute(
+                """
+                INSERT INTO diaries (day, summary)
+                VALUES (?, ?)
+                ON CONFLICT(day) DO UPDATE SET summary = excluded.summary
+                """,
+                (when, text),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT id, day, summary FROM diaries WHERE day = ?",
+                (when,),
+            ).fetchone()
+        if row is None:
+            msg = "diary write failed"
+            raise RuntimeError(msg)
+        logger.info("memory diary day=%s", when)
+        return _diary(row)
+
+    def mood_prompt_block(self) -> str:
+        if not self._mood_enabled:
+            return ""
+        return mood_block(self.get_mood())
+
+    def get_mood(self) -> MoodState:
+        self._ensure_mood_row()
+        with self._session() as conn:
+            row = conn.execute(
+                "SELECT energy, irritation, affection, updated_at FROM mood_state WHERE id = 1"
+            ).fetchone()
+            hours = 0.0
+            if row is not None:
+                raw_hours = conn.execute(
+                    "SELECT (julianday('now') - julianday(?)) * 24",
+                    (row["updated_at"],),
+                ).fetchone()
+                hours = float(raw_hours[0] or 0.0) if raw_hours else 0.0
+        if row is None:
+            return clamp_mood(0.0, 0.0, 0.0)
+        current = clamp_mood(
+            float(row["energy"]), float(row["irritation"]), float(row["affection"])
+        )
+        decayed = decay_mood(current, hours, self._mood_decay_per_hour)
+        if decayed != current:
+            self._write_mood(decayed)
+        return decayed
+
+    def apply_mood_from_text(self, text: str) -> MoodState:
+        if not self._mood_enabled:
+            return self.get_mood()
+        delta = mood_delta_from_text(text)
+        return self.apply_mood_delta(delta)
+
+    def apply_mood_delta(self, delta: MoodState) -> MoodState:
+        current = self.get_mood()
+        nxt = clamp_mood(
+            current.energy + delta.energy,
+            current.irritation + delta.irritation,
+            current.affection + delta.affection,
+        )
+        self._write_mood(nxt)
+        return nxt
+
+    def export_markdown(self, dest: Path | str) -> Path:
+        path = Path(dest)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        mood = self.get_mood()
+        impression = self.active_impression()
+        lines = [
+            "# 四季夏目记忆导出",
+            "",
+            "## 相处状态",
+            f"- energy: {mood.energy:.2f}",
+            f"- irritation: {mood.irritation:.2f}",
+            f"- affection: {mood.affection:.2f}",
+            f"- cycle_enabled: {self.cycle_enabled}",
+            "",
+            "## 核心印象",
+            impression.text if impression else "（无）",
+            "",
+            "## 事实",
+        ]
+        facts = self.list_facts(status=None)
+        if facts:
+            lines.extend(f"- [{row.status}] {row.key}: {row.value}" for row in facts)
+        else:
+            lines.append("（无）")
+        lines.extend(["", "## 日记"])
+        diaries = self.list_diaries(limit=30)
+        if diaries:
+            lines.extend(f"- {row.day}：{row.summary}" for row in diaries)
+        else:
+            lines.append("（无）")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        logger.info("memory exported path=%s", path)
+        return path
+
+    def _write_mood(self, state: MoodState) -> None:
+        self._ensure_mood_row()
+        with self._session() as conn:
+            conn.execute(
+                """
+                UPDATE mood_state
+                SET energy = ?, irritation = ?, affection = ?, updated_at = datetime('now')
+                WHERE id = 1
+                """,
+                (state.energy, state.irritation, state.affection),
+            )
+            conn.commit()
+
+    def _ensure_mood_row(self) -> None:
+        with self._session() as conn:
+            conn.execute("INSERT OR IGNORE INTO mood_state (id) VALUES (1)")
+            conn.commit()
+
     def ingest_import_rows(self, rows: list[dict[str, Any]]) -> int:
         """群导入：事实 pending、风格 candidate、情节 pending，不转正。"""
         written = 0
@@ -605,6 +941,7 @@ class MemoryStore:
         with self._session() as conn:
             conn.executescript(sql)
             conn.commit()
+        self._ensure_mood_row()
 
     def _seed_defaults(self) -> None:
         if self.get_by_key(KEY_NICKNAME) is None:
@@ -691,6 +1028,19 @@ def _style(row: sqlite3.Row) -> StyleTerm:
     )
 
 
+def _diary(row: sqlite3.Row) -> Diary:
+    return Diary(id=int(row["id"]), day=str(row["day"]), summary=str(row["summary"]))
+
+
+def _impression(row: sqlite3.Row) -> Impression:
+    return Impression(
+        id=int(row["id"]),
+        text=str(row["text"]),
+        status=str(row["status"]),
+        source=str(row["source"]),
+    )
+
+
 def _category(raw: str) -> str:
     allowed = {"identity", "relationship", "rule", "preference", "other"}
     if raw in allowed:
@@ -731,6 +1081,24 @@ def _remember_key(value: str) -> str:
 
 def _clamp_k(k: int) -> int:
     return max(RETRIEVE_K_MIN, min(int(k), RETRIEVE_K_MAX))
+
+
+def _text_overlap(query: str, text: str) -> bool:
+    needle = (query or "").strip()
+    haystack = text or ""
+    if not needle or not haystack:
+        return False
+    if needle in haystack:
+        return True
+    for token in needle.replace("，", " ").replace(",", " ").split():
+        if len(token) >= 2 and token in haystack:
+            return True
+    if len(needle) >= 2:
+        for index in range(len(needle) - 1):
+            gram = needle[index : index + 2]
+            if gram.strip() and gram in haystack:
+                return True
+    return False
 
 
 def _fact_status(raw: str) -> str:

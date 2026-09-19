@@ -23,6 +23,7 @@ class VectorHit:
     episode_id: int
     embedding_id: str
     distance: float
+    score: float
 
 
 class EpisodeIndex:
@@ -60,11 +61,13 @@ class EpisodeIndex:
         rows = table.search(query).limit(k).to_list()
         hits: list[VectorHit] = []
         for row in rows:
+            distance = float(row.get("_distance", 0.0))
             hits.append(
                 VectorHit(
                     episode_id=int(row["episode_id"]),
                     embedding_id=str(row["embedding_id"]),
-                    distance=float(row.get("_distance", 0.0)),
+                    distance=distance,
+                    score=distance_to_score(distance),
                 )
             )
         return hits
@@ -89,6 +92,12 @@ class EpisodeIndex:
 
 def embedding_id_for(episode_id: int) -> str:
     return f"{EMBED_ID_PREFIX}{int(episode_id)}"
+
+
+def distance_to_score(distance: float) -> float:
+    """L2 归一化向量：score = 1 - d²/2，裁到 0～1。"""
+    cosine = 1.0 - (float(distance) ** 2) / 2.0
+    return max(0.0, min(1.0, cosine))
 
 
 def _validate_embedding_id(embedding_id: str) -> None:
