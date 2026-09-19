@@ -45,6 +45,25 @@ def assistant_text_frame(outbound: OutboundMessage) -> dict[str, Any]:
     }
 
 
+def assistant_audio_frame(
+    outbound: OutboundMessage,
+    *,
+    url: str,
+    duration_ms: int | None = None,
+) -> dict[str, Any]:
+    frame: dict[str, Any] = {
+        "type": "assistant_audio",
+        "message_id": outbound.message_id,
+        "reply_to": outbound.reply_to_id,
+        "mime": "audio/wav",
+        "url": url,
+        "emotion": outbound.emotion,
+    }
+    if duration_ms is not None:
+        frame["duration_ms"] = duration_ms
+    return frame
+
+
 class WebChannel:
     name = "web"
 

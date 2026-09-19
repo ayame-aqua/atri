@@ -22,9 +22,14 @@ llm:
   disable_thinking: true
 
 speech:
-  # P3：本机引擎在 engines/GPT-SoVITS（gitignore）；权重在 data/natsume/weights/
+  # P3-A：本机 GPT-SoVITS api_v2；权重不进仓库。P3-B 才接 ASR。
   tts_api_base: http://127.0.0.1:9880
   tts_text_lang: ja
+  tts_timeout_s: 60
+  tts_ref_dir: data/natsume/references
+  tts_cache_dir: data/tts_cache
+  tts_gpt_weights: data/natsume/weights/natsume-e15.ckpt
+  tts_sovits_weights: data/natsume/weights/natsume_e8_s1104.pth
   asr_model: faster-whisper-small
 
 channels:

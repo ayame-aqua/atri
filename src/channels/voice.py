@@ -10,7 +10,7 @@ class VoiceChannel:
 
     async def start(self, gateway: object) -> None:
         del gateway
-        # P3 再挂麦克风上行；P1 不启用
+        # P3-B 再挂麦克风上行；P3-A 只出声
 
     async def send(self, message: OutboundMessage) -> None:
         del message

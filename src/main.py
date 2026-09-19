@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.channels.web import assistant_text_frame, parse_user_text_frame
+from src.channels.web import assistant_audio_frame, assistant_text_frame, parse_user_text_frame
 from src.config import REPO_ROOT, load_config
 from src.core.agent import Agent
 from src.core.errors import BAD_REQUEST, human_message
@@ -22,6 +22,7 @@ from src.core.living_notes import LivingNotesStore
 from src.core.llm import LLMClient, LLMError
 from src.core.persona import split_persona
 from src.core.session import SessionStore
+from src.core.types import OutboundMessage
 from src.gateway import Gateway
 from src.memory.constants import (
     DEFAULT_CHAT_ID,
@@ -34,6 +35,16 @@ from src.memory.constants import (
 )
 from src.memory.store import Episode, Fact, MemoryStore, StyleTerm
 from src.memory.summarize import summarize_turns
+from src.speech.constants import (
+    DEFAULT_CACHE_DIR,
+    DEFAULT_GPT_WEIGHTS,
+    DEFAULT_REF_DIR,
+    DEFAULT_SOVITS_WEIGHTS,
+    DEFAULT_TTS_API_BASE,
+    DEFAULT_TTS_TIMEOUT_S,
+    TTS_TEXT_LANG,
+)
+from src.speech.tts import SoVitsTts, TtsError
 
 logger = logging.getLogger(__name__)
 WEB_DIR = REPO_ROOT / "web"
@@ -88,6 +99,27 @@ def _attach_runtime(
     app.state.llm = llm
     app.state.persona_path = persona_path
     app.state.llm_ready = llm is not None
+    speech_cfg = settings.get("speech") or {}
+    api_base = str(speech_cfg.get("tts_api_base", DEFAULT_TTS_API_BASE))
+    ref_rel = str(speech_cfg.get("tts_ref_dir", DEFAULT_REF_DIR))
+    cache_rel = str(speech_cfg.get("tts_cache_dir", DEFAULT_CACHE_DIR))
+    ref_dir = Path(ref_rel) if os.path.isabs(ref_rel) else REPO_ROOT / ref_rel
+    cache_dir = Path(cache_rel) if os.path.isabs(cache_rel) else REPO_ROOT / cache_rel
+    timeout_s = float(speech_cfg.get("tts_timeout_s", DEFAULT_TTS_TIMEOUT_S))
+    text_lang = str(speech_cfg.get("tts_text_lang", TTS_TEXT_LANG))
+    gpt_rel = str(speech_cfg.get("tts_gpt_weights", DEFAULT_GPT_WEIGHTS))
+    sovits_rel = str(speech_cfg.get("tts_sovits_weights", DEFAULT_SOVITS_WEIGHTS))
+    gpt_weights = Path(gpt_rel) if os.path.isabs(gpt_rel) else REPO_ROOT / gpt_rel
+    sovits_weights = Path(sovits_rel) if os.path.isabs(sovits_rel) else REPO_ROOT / sovits_rel
+    app.state.tts = SoVitsTts(
+        api_base=api_base,
+        ref_dir=ref_dir,
+        cache_dir=cache_dir,
+        timeout_s=timeout_s,
+        text_lang=text_lang,
+        gpt_weights=gpt_weights,
+        sovits_weights=sovits_weights,
+    )
 
 
 def _build_llm(config: dict[str, Any]) -> LLMClient:
@@ -264,6 +296,16 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
     async def index() -> FileResponse:
         return FileResponse(WEB_DIR / "index.html")
 
+    @app.get("/media/tts/{audio_id}")
+    async def tts_media(audio_id: str) -> FileResponse:
+        tts: SoVitsTts | None = getattr(app.state, "tts", None)
+        if tts is None:
+            raise HTTPException(status_code=404, detail="tts not ready")
+        path = tts.clip_path(audio_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail="clip not found")
+        return FileResponse(path, media_type="audio/wav")
+
     @app.websocket("/ws/chat")
     async def chat_socket(websocket: WebSocket) -> None:
         await websocket.accept()
@@ -314,9 +356,39 @@ async def _handle_socket_text(websocket: WebSocket, gateway: Gateway, raw: str) 
         await websocket.send_json({"type": "duplicate", "message_id": inbound.message_id})
     await websocket.send_json(assistant_text_frame(result.outbound))
     await websocket.send_json({"type": "status", "message_id": inbound.message_id, "state": "idle"})
+    await _send_assistant_audio(websocket, result.outbound)
 
 
-async def _send_error(websocket: WebSocket, message_id: Any, code: str) -> None:
+async def _send_assistant_audio(websocket: WebSocket, outbound: OutboundMessage) -> None:
+    speech_ja = outbound.speech_ja
+    if not speech_ja:
+        return
+    tts = getattr(websocket.app.state, "tts", None)
+    if not isinstance(tts, SoVitsTts):
+        return
+    try:
+        clip = await tts.synthesize_to_cache(speech_ja, outbound.emotion)
+    except TtsError:
+        logger.exception("tts failed message_id=%s", outbound.message_id)
+        await websocket.send_json(
+            {
+                "type": "status",
+                "message_id": outbound.message_id,
+                "state": "tts_failed",
+            }
+        )
+        return
+    outbound.audio_url = f"/media/tts/{clip.audio_id}"
+    await websocket.send_json(
+        assistant_audio_frame(
+            outbound,
+            url=outbound.audio_url,
+            duration_ms=clip.duration_ms,
+        )
+    )
+
+
+async def _send_error(websocket: WebSocket, message_id: object, code: str) -> None:
     frame: dict[str, Any] = {
         "type": "error",
         "code": code,

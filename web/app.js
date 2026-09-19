@@ -13,6 +13,27 @@ const ERROR_TEXT = {
 
 let socket = null;
 let busy = false;
+let currentAudio = null;
+
+function playAssistantAudio(url) {
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+  const audio = new Audio(url);
+  currentAudio = audio;
+  audio.addEventListener("ended", () => {
+    if (currentAudio === audio) {
+      currentAudio = null;
+    }
+    if (!busy) {
+      setStatus("在线");
+    }
+  });
+  audio.play()
+    .then(() => setStatus("她在说话"))
+    .catch(() => setStatus("语音播放失败"));
+}
 
 function setStatus(text) {
   if (statusEl) {
@@ -71,6 +92,8 @@ function connect() {
     if (frame.type === "status") {
       if (frame.state === "thinking") {
         setStatus("她在想…");
+      } else if (frame.state === "tts_failed") {
+        setStatus("语音合成失败，文字还在");
       } else if (frame.state === "idle") {
         setStatus("在线");
         busy = false;
@@ -82,6 +105,12 @@ function connect() {
       const text = Array.isArray(frame.texts) ? frame.texts.join("\n") : "";
       if (text) {
         appendMessage("assistant", text);
+      }
+      return;
+    }
+    if (frame.type === "assistant_audio") {
+      if (typeof frame.url === "string" && frame.url) {
+        playAssistantAudio(frame.url);
       }
       return;
     }

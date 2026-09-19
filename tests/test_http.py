@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 from src.config import load_config
 from src.main import create_app
 from src.memory.store import MemoryStore
+
+
+def _tiny_wav() -> bytes:
+    byte_rate = 32000
+    data = b"\x00" * 3200
+    return (
+        b"RIFF"
+        + struct.pack("<I", 36 + len(data))
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, 16000, byte_rate, 2, 16)
+        + b"data"
+        + struct.pack("<I", len(data))
+        + data
+    )
 
 
 def test_health_ok() -> None:
@@ -39,6 +54,28 @@ def test_memory_page() -> None:
     assert response.status_code == 200
     assert "记忆" in response.text
     assert "待确认" in response.text
+
+
+def test_tts_media_unknown_id() -> None:
+    client = TestClient(create_app())
+    response = client.get("/media/tts/deadbeefdeadbeef")
+    assert response.status_code == 404
+
+
+def test_tts_media_serves_cached(tmp_path: Path) -> None:
+    cache = tmp_path / "tts_cache"
+    cache.mkdir()
+    audio_id = "0123456789abcdef"
+    (cache / f"{audio_id}.wav").write_bytes(_tiny_wav())
+    settings = load_config()
+    speech_cfg = dict(settings.get("speech") or {})
+    speech_cfg["tts_cache_dir"] = str(cache)
+    speech_cfg["tts_ref_dir"] = str(tmp_path / "refs")
+    settings["speech"] = speech_cfg
+    client = TestClient(create_app(settings))
+    response = client.get(f"/media/tts/{audio_id}")
+    assert response.status_code == 200
+    assert response.content[:4] == b"RIFF"
 
 
 def test_summarize_empty_session() -> None:

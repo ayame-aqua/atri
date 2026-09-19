@@ -1,5 +1,5 @@
 ---
-description: 四季夏目开发规范：人设、阶段纪律、日常提交与版本发布两层流程
+description: 四季夏目开发规范：人设、阶段纪律、每次改完都发一版 Git
 alwaysApply: true
 ---
 
@@ -9,37 +9,19 @@ alwaysApply: true
 
 GitHub 仓库与本地目录名为 `shiki-natsume`。**角色不要写成亚托莉。**
 
-发布分两层，不要混用。
-
-## 日常小改动
-
-改代码或文档即可，**不必写版本记录、不必打 tag、不必等 CI 当门槛**。
-
-提交和推送走界面即可（Source Control 里 commit + push）。用户要求你代为提交时，也可以 `git commit` 并 `git push`，仍然 **不打 tag、不写 `docs/变更/v0.x.md`、不改总纲版本号**。
-
-**禁止** `git config`。代为提交时用：
-
-`git -c user.name="ayame-aqua" -c user.email="ayameaqua.lewis.tang@gmail.com"`
-
-不要提交 `.env`、密钥、`data/`、模型权重、官方拆包资源、截屏、表情包原图、GPT-SoVITS 工程。
-
-允许用分支和 PR，不强制。
-
-## 阶段交付 / 明确功能完成 / 准备发布
-
-仅在下面情况才版本化：
-
-1. 完成一个明确功能或可交付阶段（该 P 验收通过，或用户宣布本阶段交付）
-2. 准备对外发布，或用户明确要求打版本
-
-那时才按下面做完：
+**每次改完都发一版。** 不要只改文件不打版本。
 
 1. `git tag --sort=v:refname` 取最新 `v0.x`，小版本 +1。只增不改旧 tag。
 2. 新建 `docs/变更/<版本>.md`。写清版本、做了什么、改哪些文件、为什么。总纲里的「版本」字段改成本轮版本号。
 3. 后端一律 **Python 3.11+**。
-4. `git status` / `diff` / `log` 看完再提交（同样禁止 `git config`，作者信息同上）。
-5. `git tag -a <版本> -m "..."`。
-6. `git push origin main` 且 `git push origin <版本>`。等 `.github/workflows/ci.yml`。红了就修；需要再发一版时出**新版本**，不要改旧 tag。
+4. `git status` / `diff` / `log` 看完再提交。
+5. **禁止** `git config`。提交与打 tag 用：`git -c user.name="ayame-aqua" -c user.email="ayameaqua.lewis.tang@gmail.com"`
+6. `git tag -a <版本> -m "..."`。
+7. `git push origin main` 且 `git push origin <版本>`。等 `.github/workflows/ci.yml`。红了就修；再发一版出**新版本**，不要改旧 tag。
+
+不要提交 `.env`、密钥、`data/`、模型权重、官方拆包资源、截屏、表情包原图、GPT-SoVITS 工程。
+
+允许用分支和 PR，不强制。
 
 ## 其它
 
