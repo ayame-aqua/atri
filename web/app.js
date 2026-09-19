@@ -19,8 +19,8 @@ const RECORD_MIME_CANDIDATES = [
   "audio/mp4",
 ];
 
-const VAD_MIN_SPEECH_MS = 180;
-const VAD_SILENCE_MS = 450;
+const VAD_MIN_SPEECH_MS = 400;
+const VAD_SILENCE_MS = 800;
 const VAD_MAX_UTTER_MS = 7000;
 const VAD_POLL_MS = 40;
 const VAD_TIMESLICE_MS = 200;
@@ -29,7 +29,6 @@ const VAD_SPEECH_HZ_HI = 3800;
 const VAD_SPEAK_OVER_FLOOR = 0.06;
 const VAD_SPEAK_RATIO = 2.2;
 const VAD_SILENCE_RATIO = 1.4;
-const VAD_END_PEAK_RATIO = 0.36;
 const VAD_FLOOR_EMA = 0.1;
 const VAD_FLOOR_MIN = 0.01;
 const VAD_REPORT_MS = 200;
@@ -183,9 +182,7 @@ function isVoiceOn(band) {
 }
 
 function isVoiceOff(band) {
-  const nearFloor = band <= noiseFloor * VAD_SILENCE_RATIO;
-  const droppedFromPeak = peakBand > 0 && band <= peakBand * VAD_END_PEAK_RATIO;
-  return nearFloor || droppedFromPeak;
+  return band <= noiseFloor * VAD_SILENCE_RATIO;
 }
 
 function percent(value) {

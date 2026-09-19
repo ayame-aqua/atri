@@ -26,7 +26,8 @@ def test_clear_transcript_rejects_noise() -> None:
     assert is_clear_transcript("……") is False
     assert is_clear_transcript("嗯") is False
     assert is_clear_transcript("在吗") is True
-    assert is_clear_transcript("hi") is True
+    assert is_clear_transcript("hi") is False
+    assert is_clear_transcript("T very social.") is False
 
 
 def test_transcribe_short_audio_returns_empty() -> None:

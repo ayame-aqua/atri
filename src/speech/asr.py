@@ -10,6 +10,7 @@ from pathlib import Path
 
 from src.speech.constants import (
     ASR_BEAM_SIZE,
+    ASR_INITIAL_PROMPT,
     ASR_LANGUAGE,
     ASR_MAX_AUDIO_BYTES,
     ASR_MIN_AUDIO_BYTES,
@@ -20,13 +21,14 @@ from src.speech.constants import (
     DEFAULT_ASR_MODEL,
     SENSEVOICE_LANGUAGE,
     SENSEVOICE_MODEL_ID,
+    SENSEVOICE_VAD_MAX_MS,
+    SENSEVOICE_VAD_MODEL,
     WHISPER_FALLBACK_SIZE,
 )
 from src.speech.debug_log import speech_debug
 
 logger = logging.getLogger(__name__)
 
-_KEEP_CHAR = re.compile(r"[\w\u4e00-\u9fff]", re.UNICODE)
 _SENSEVOICE_TAG = re.compile(r"<\|[^|]*\|>")
 
 _MIME_SUFFIX = {
@@ -76,6 +78,8 @@ class SenseVoiceAsr:
         try:
             self._model = AutoModel(
                 model=self._model_id,
+                vad_model=SENSEVOICE_VAD_MODEL,
+                vad_kwargs={"max_single_segment_time": SENSEVOICE_VAD_MAX_MS},
                 device=device,
                 disable_update=True,
             )
@@ -95,6 +99,7 @@ class SenseVoiceAsr:
                 cache={},
                 language=SENSEVOICE_LANGUAGE,
                 use_itn=True,
+                batch_size_s=60,
             )
         except Exception as exc:
             msg = "sensevoice infer failed"
@@ -156,6 +161,7 @@ class FasterWhisperAsr:
             segments, _info = transcribe(
                 str(path),
                 language=ASR_LANGUAGE,
+                initial_prompt=ASR_INITIAL_PROMPT,
                 vad_filter=True,
                 beam_size=ASR_BEAM_SIZE,
             )
@@ -216,8 +222,9 @@ def asr_model_size(name: str) -> str:
 
 
 def is_clear_transcript(text: str) -> bool:
-    kept = "".join(_KEEP_CHAR.findall(text or ""))
-    return len(kept) >= ASR_MIN_TEXT_CHARS
+    """只认中文。英文幻觉（如 T very social）当没听清。"""
+    cjk = re.findall(r"[\u4e00-\u9fff]", text or "")
+    return len(cjk) >= ASR_MIN_TEXT_CHARS
 
 
 def _ensure_wav(path: Path) -> Path:
