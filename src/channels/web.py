@@ -35,6 +35,20 @@ def parse_user_text_frame(payload: dict[str, Any]) -> InboundMessage | str:
     )
 
 
+def user_transcript_frame(
+    message_id: str,
+    text: str,
+    *,
+    unclear: bool = False,
+) -> dict[str, Any]:
+    return {
+        "type": "user_transcript",
+        "message_id": message_id,
+        "text": text,
+        "unclear": unclear,
+    }
+
+
 def assistant_text_frame(outbound: OutboundMessage) -> dict[str, Any]:
     return {
         "type": "assistant_text",

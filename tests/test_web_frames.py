@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.channels.web import assistant_audio_frame, parse_user_text_frame
+from src.channels.web import assistant_audio_frame, parse_user_text_frame, user_transcript_frame
 from src.core.errors import BAD_REQUEST
 from src.core.types import InboundMessage, OutboundMessage
 
@@ -31,3 +31,10 @@ def test_assistant_audio_frame() -> None:
     assert frame["url"] == "/media/tts/ab"
     assert frame["duration_ms"] == 1200
     assert frame["emotion"] == "shy"
+
+
+def test_user_transcript_frame() -> None:
+    frame = user_transcript_frame("m1", "在吗")
+    assert frame["type"] == "user_transcript"
+    assert frame["text"] == "在吗"
+    assert frame["unclear"] is False

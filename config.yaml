@@ -29,7 +29,7 @@ llm:
   disable_thinking: true
 
 speech:
-  # P3-A：本机 GPT-SoVITS api_v2；权重不进仓库。P3-B 才接 ASR。
+  # P3-A：本机 GPT-SoVITS api_v2；权重不进仓库。P3-B：Faster-Whisper，权重走本机缓存。
   tts_api_base: http://127.0.0.1:9880
   tts_text_lang: ja
   tts_timeout_s: 60
@@ -43,7 +43,7 @@ channels:
   web:
     enabled: true
   voice:
-    enabled: false
+    enabled: true
   qq:
     enabled: false
   wechat:

@@ -1,4 +1,4 @@
-"""P3-A TTS 常量。"""
+"""P3 语音常量。P3-A TTS；P3-B ASR。"""
 
 from __future__ import annotations
 
@@ -18,6 +18,19 @@ WAV_HEADER_SIZE = 44
 ERROR_BODY_MAX = 500
 SAD_FALLBACK_EMOTION = "neutral"
 PROMPTS_FILE = "prompts.json"
+
+DEFAULT_ASR_MODEL = "faster-whisper-small"
+ASR_MODEL_PREFIX = "faster-whisper-"
+ASR_LANGUAGE = "zh"
+ASR_NO_SPEECH_MAX = 0.6
+ASR_MIN_AUDIO_BYTES = 2000
+ASR_MAX_AUDIO_BYTES = 3 * 1024 * 1024
+ASR_MIN_TEXT_CHARS = 2
+ASR_BEAM_SIZE = 1
+UNCLEAR_REPLY = "没听清"
+USER_AUDIO_TYPE = "user_audio"
+USER_TRANSCRIPT_TYPE = "user_transcript"
+STATUS_UNCLEAR = "unclear"
 
 EMOTION_REF_FILES = {
     "neutral": ("ref_01.wav", "あ、結構忙しかったわね"),

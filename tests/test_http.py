@@ -46,6 +46,7 @@ def test_index_page() -> None:
     assert response.status_code == 200
     assert "四季夏目" in response.text
     assert "/memory" in response.text
+    assert "录音" in response.text
 
 
 def test_memory_page() -> None:

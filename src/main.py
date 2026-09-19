@@ -14,7 +14,13 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.channels.web import assistant_audio_frame, assistant_text_frame, parse_user_text_frame
+from src.channels.voice import VoiceChannel, inbound_from_transcript, parse_user_audio_frame
+from src.channels.web import (
+    assistant_audio_frame,
+    assistant_text_frame,
+    parse_user_text_frame,
+    user_transcript_frame,
+)
 from src.config import REPO_ROOT, load_config
 from src.core.agent import Agent
 from src.core.errors import BAD_REQUEST, human_message
@@ -22,7 +28,7 @@ from src.core.living_notes import LivingNotesStore
 from src.core.llm import LLMClient, LLMError
 from src.core.persona import split_persona
 from src.core.session import SessionStore
-from src.core.types import OutboundMessage
+from src.core.types import InboundMessage, OutboundMessage
 from src.gateway import Gateway
 from src.memory.constants import (
     DEFAULT_CHAT_ID,
@@ -40,14 +46,19 @@ from src.memory.constants import (
 )
 from src.memory.store import Diary, Episode, Fact, Impression, MemoryStore, StyleTerm
 from src.memory.summarize import summarize_turns
+from src.speech.asr import FasterWhisperAsr
 from src.speech.constants import (
+    DEFAULT_ASR_MODEL,
     DEFAULT_CACHE_DIR,
     DEFAULT_GPT_WEIGHTS,
     DEFAULT_REF_DIR,
     DEFAULT_SOVITS_WEIGHTS,
     DEFAULT_TTS_API_BASE,
     DEFAULT_TTS_TIMEOUT_S,
+    STATUS_UNCLEAR,
     TTS_TEXT_LANG,
+    UNCLEAR_REPLY,
+    USER_AUDIO_TYPE,
 )
 from src.speech.tts import SoVitsTts, TtsError
 
@@ -135,6 +146,16 @@ def _attach_runtime(
         gpt_weights=gpt_weights,
         sovits_weights=sovits_weights,
     )
+    asr_model = str(speech_cfg.get("asr_model", DEFAULT_ASR_MODEL))
+    channels_cfg = settings.get("channels") or {}
+    voice_on = bool((channels_cfg.get("voice") or {}).get("enabled", True))
+    if voice_on:
+        asr = FasterWhisperAsr(asr_model)
+        app.state.asr = asr
+        app.state.voice = VoiceChannel(asr)
+    else:
+        app.state.asr = None
+        app.state.voice = None
 
 
 def _build_llm(config: dict[str, Any]) -> LLMClient:
@@ -374,11 +395,59 @@ async def _handle_socket_text(websocket: WebSocket, gateway: Gateway, raw: str) 
         await _send_error(websocket, None, BAD_REQUEST)
         return
 
+    if payload.get("type") == USER_AUDIO_TYPE:
+        await _handle_user_audio(websocket, gateway, payload)
+        return
+
     inbound = parse_user_text_frame(payload)
     if isinstance(inbound, str):
         await _send_error(websocket, payload.get("message_id"), inbound)
         return
+    await _run_inbound(websocket, gateway, inbound)
 
+
+async def _handle_user_audio(
+    websocket: WebSocket,
+    gateway: Gateway,
+    payload: dict[str, Any],
+) -> None:
+    parsed = parse_user_audio_frame(payload)
+    if isinstance(parsed, str):
+        await _send_error(websocket, payload.get("message_id"), parsed)
+        return
+    voice = getattr(websocket.app.state, "voice", None)
+    if not isinstance(voice, VoiceChannel):
+        logger.error("voice channel missing message_id=%s", parsed.message_id)
+        await _send_unclear(websocket, parsed.message_id, "")
+        return
+    result = await voice.transcribe(parsed)
+    await websocket.send_json(
+        user_transcript_frame(parsed.message_id, result.text, unclear=result.unclear)
+    )
+    if result.unclear:
+        await _send_unclear(websocket, parsed.message_id, result.text)
+        return
+    await _run_inbound(websocket, gateway, inbound_from_transcript(parsed.message_id, result.text))
+
+
+async def _send_unclear(websocket: WebSocket, message_id: str, text: str) -> None:
+    del text
+    await websocket.send_json(
+        {
+            "type": "status",
+            "message_id": message_id,
+            "state": STATUS_UNCLEAR,
+            "message": UNCLEAR_REPLY,
+        }
+    )
+    await websocket.send_json({"type": "status", "message_id": message_id, "state": "idle"})
+
+
+async def _run_inbound(
+    websocket: WebSocket,
+    gateway: Gateway,
+    inbound: InboundMessage,
+) -> None:
     await websocket.send_json(
         {"type": "status", "message_id": inbound.message_id, "state": "thinking"}
     )
