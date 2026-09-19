@@ -50,3 +50,4 @@
 | [v0.44](./v0.44.md) | P3-C：点对话持续听，停顿自动切句 |
 | [v0.45](./v0.45.md) | P3-C：自适应 VAD，停顿能切断 |
 | [v0.46](./v0.46.md) | P3-B：SenseVoice-Small；实时语音落本机日志 |
+| [v0.47](./v0.47.md) | 修切句卡住：SenseVoice 补 fbank，转写不再堵 WebSocket |

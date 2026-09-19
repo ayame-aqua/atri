@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -401,7 +402,8 @@ async def _handle_socket_text(websocket: WebSocket, gateway: Gateway, raw: str) 
         _log_vad_level(payload)
         return
     if payload.get("type") == USER_AUDIO_TYPE:
-        await _handle_user_audio(websocket, gateway, payload)
+        task = asyncio.create_task(_handle_user_audio(websocket, gateway, payload))
+        task.add_done_callback(_log_socket_task)
         return
 
     inbound = parse_user_text_frame(payload)
@@ -409,6 +411,14 @@ async def _handle_socket_text(websocket: WebSocket, gateway: Gateway, raw: str) 
         await _send_error(websocket, payload.get("message_id"), inbound)
         return
     await _run_inbound(websocket, gateway, inbound)
+
+
+def _log_socket_task(task: asyncio.Task[None]) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("user audio task failed", exc_info=exc)
 
 
 def _log_vad_level(payload: dict[str, Any]) -> None:
@@ -437,6 +447,12 @@ async def _handle_user_audio(
     if isinstance(parsed, str):
         await _send_error(websocket, payload.get("message_id"), parsed)
         return
+    speech_debug(
+        "slice",
+        message_id=parsed.message_id,
+        bytes=len(parsed.audio),
+        mime=parsed.mime,
+    )
     voice = getattr(websocket.app.state, "voice", None)
     if not isinstance(voice, VoiceChannel):
         logger.error("voice channel missing message_id=%s", parsed.message_id)
