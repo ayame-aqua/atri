@@ -19,7 +19,11 @@ ERROR_BODY_MAX = 500
 SAD_FALLBACK_EMOTION = "neutral"
 PROMPTS_FILE = "prompts.json"
 
-DEFAULT_ASR_MODEL = "faster-whisper-small"
+DEFAULT_ASR_MODEL = "sensevoice-small"
+SENSEVOICE_MODEL_ID = "iic/SenseVoiceSmall"
+SENSEVOICE_LANGUAGE = "zn"
+ASR_WAV_RATE = 16000
+WHISPER_FALLBACK_SIZE = "large-v3"
 ASR_MODEL_PREFIX = "faster-whisper-"
 ASR_LANGUAGE = "zh"
 ASR_NO_SPEECH_MAX = 0.6
@@ -30,6 +34,7 @@ ASR_BEAM_SIZE = 1
 UNCLEAR_REPLY = "没听清"
 USER_AUDIO_TYPE = "user_audio"
 USER_TRANSCRIPT_TYPE = "user_transcript"
+VAD_LEVEL_TYPE = "vad_level"
 STATUS_UNCLEAR = "unclear"
 
 EMOTION_REF_FILES = {

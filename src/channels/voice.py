@@ -6,18 +6,23 @@ import base64
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from src.channels.web import SENDER_ID, SENDER_NAME, WEB_CHAT_ID
 from src.core.errors import BAD_REQUEST
 from src.core.types import InboundMessage, OutboundMessage
-from src.speech.asr import AsrError, FasterWhisperAsr, is_clear_transcript
+from src.speech.asr import AsrError, is_clear_transcript
 from src.speech.constants import (
     ASR_MAX_AUDIO_BYTES,
     USER_AUDIO_TYPE,
 )
+from src.speech.debug_log import speech_debug
 
 logger = logging.getLogger(__name__)
+
+
+class Transcriber(Protocol):
+    async def transcribe(self, audio_bytes: bytes, mime: str) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -75,7 +80,7 @@ def inbound_from_transcript(message_id: str, text: str) -> InboundMessage:
 class VoiceChannel:
     name = "voice"
 
-    def __init__(self, asr: FasterWhisperAsr | None = None) -> None:
+    def __init__(self, asr: Transcriber | None = None) -> None:
         self._asr = asr
 
     async def start(self, gateway: object) -> None:
@@ -92,9 +97,27 @@ class VoiceChannel:
             text = await self._asr.transcribe(parsed.audio, parsed.mime)
         except AsrError:
             logger.exception("asr failed message_id=%s", parsed.message_id)
+            speech_debug(
+                "asr_fail",
+                message_id=parsed.message_id,
+                bytes=len(parsed.audio),
+                mime=parsed.mime,
+            )
             return TranscriptResult(text="", unclear=True)
         if not is_clear_transcript(text):
             logger.info("asr unclear message_id=%s chars=%s", parsed.message_id, len(text))
+            speech_debug(
+                "asr_unclear",
+                message_id=parsed.message_id,
+                text=text,
+                bytes=len(parsed.audio),
+            )
             return TranscriptResult(text=text, unclear=True)
         logger.info("asr ok message_id=%s chars=%s", parsed.message_id, len(text))
+        speech_debug(
+            "asr_ok",
+            message_id=parsed.message_id,
+            text=text,
+            bytes=len(parsed.audio),
+        )
         return TranscriptResult(text=text, unclear=False)

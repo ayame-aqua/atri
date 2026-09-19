@@ -3,6 +3,7 @@ const inputEl = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const liveBtn = document.getElementById("live");
 const statusEl = document.getElementById("status");
+const vadMeterEl = document.getElementById("vad-meter");
 const nameEl = document.getElementById("character-name");
 
 const ERROR_TEXT = {
@@ -31,6 +32,7 @@ const VAD_SILENCE_RATIO = 1.4;
 const VAD_END_PEAK_RATIO = 0.36;
 const VAD_FLOOR_EMA = 0.1;
 const VAD_FLOOR_MIN = 0.01;
+const VAD_REPORT_MS = 200;
 const ANALYSER_FFT_SIZE = 2048;
 
 let socket = null;
@@ -50,6 +52,7 @@ let silenceStartedAt = 0;
 let utteranceStartedAt = 0;
 let noiseFloor = VAD_FLOOR_MIN;
 let peakBand = 0;
+let lastVadReportAt = 0;
 
 function isSpeaking() {
   return Boolean(currentAudio && !currentAudio.paused && !currentAudio.ended);
@@ -185,6 +188,47 @@ function isVoiceOff(band) {
   return nearFloor || droppedFromPeak;
 }
 
+function percent(value) {
+  return `${Math.round(Math.max(0, value) * 100)}%`;
+}
+
+function publishVad(band) {
+  const voice = isVoiceOn(band);
+  const snapshot = {
+    band,
+    floor: noiseFloor,
+    peak: peakBand,
+    recording: isRecording(),
+    voice,
+    busy,
+    speaking: isSpeaking(),
+  };
+  window.__natsumeVad = snapshot;
+  if (vadMeterEl) {
+    vadMeterEl.hidden = false;
+    const bar = "▮".repeat(Math.min(20, Math.round(band * 20)))
+      + "▯".repeat(Math.max(0, 20 - Math.round(band * 20)));
+    const state = snapshot.recording ? "采集中" : (voice ? "过线" : "安静");
+    vadMeterEl.textContent = `音量 ${percent(band)} ${bar} 底噪 ${percent(noiseFloor)} 峰值 ${percent(peakBand)} ${state}`;
+  }
+  const now = Date.now();
+  if (now - lastVadReportAt < VAD_REPORT_MS) {
+    return;
+  }
+  lastVadReportAt = now;
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  socket.send(JSON.stringify({
+    type: "vad_level",
+    band,
+    floor: noiseFloor,
+    peak: peakBand,
+    recording: snapshot.recording,
+    voice,
+  }));
+}
+
 function updateNoiseFloor(band) {
   if (band >= noiseFloor * VAD_SILENCE_RATIO) {
     return;
@@ -289,6 +333,8 @@ function vadTick() {
   if (audioContext && audioContext.state === "suspended") {
     void audioContext.resume();
   }
+  const band = currentBand();
+  publishVad(band);
   if (busy || isSpeaking()) {
     if (isRecording()) {
       cancelUtterance();
@@ -296,7 +342,6 @@ function vadTick() {
     resetVadClock();
     return;
   }
-  const band = currentBand();
   const now = Date.now();
   if (!isRecording()) {
     updateNoiseFloor(band);
@@ -379,6 +424,9 @@ function stopLive() {
   closeAudioGraph();
   stopTracks();
   resetVadClock();
+  if (vadMeterEl) {
+    vadMeterEl.hidden = true;
+  }
   if (!busy && !isSpeaking()) {
     setStatus("在线");
   }

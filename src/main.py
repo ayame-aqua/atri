@@ -46,7 +46,7 @@ from src.memory.constants import (
 )
 from src.memory.store import Diary, Episode, Fact, Impression, MemoryStore, StyleTerm
 from src.memory.summarize import summarize_turns
-from src.speech.asr import FasterWhisperAsr
+from src.speech.asr import build_asr
 from src.speech.constants import (
     DEFAULT_ASR_MODEL,
     DEFAULT_CACHE_DIR,
@@ -59,7 +59,9 @@ from src.speech.constants import (
     TTS_TEXT_LANG,
     UNCLEAR_REPLY,
     USER_AUDIO_TYPE,
+    VAD_LEVEL_TYPE,
 )
+from src.speech.debug_log import speech_debug
 from src.speech.tts import SoVitsTts, TtsError
 
 logger = logging.getLogger(__name__)
@@ -150,7 +152,7 @@ def _attach_runtime(
     channels_cfg = settings.get("channels") or {}
     voice_on = bool((channels_cfg.get("voice") or {}).get("enabled", True))
     if voice_on:
-        asr = FasterWhisperAsr(asr_model)
+        asr = build_asr(asr_model)
         app.state.asr = asr
         app.state.voice = VoiceChannel(asr)
     else:
@@ -395,6 +397,9 @@ async def _handle_socket_text(websocket: WebSocket, gateway: Gateway, raw: str) 
         await _send_error(websocket, None, BAD_REQUEST)
         return
 
+    if payload.get("type") == VAD_LEVEL_TYPE:
+        _log_vad_level(payload)
+        return
     if payload.get("type") == USER_AUDIO_TYPE:
         await _handle_user_audio(websocket, gateway, payload)
         return
@@ -404,6 +409,23 @@ async def _handle_socket_text(websocket: WebSocket, gateway: Gateway, raw: str) 
         await _send_error(websocket, payload.get("message_id"), inbound)
         return
     await _run_inbound(websocket, gateway, inbound)
+
+
+def _log_vad_level(payload: dict[str, Any]) -> None:
+    speech_debug(
+        "vad",
+        band=f"{_as_float(payload.get('band')):.3f}",
+        floor=f"{_as_float(payload.get('floor')):.3f}",
+        peak=f"{_as_float(payload.get('peak')):.3f}",
+        rec=1 if payload.get("recording") else 0,
+        voice=1 if payload.get("voice") else 0,
+    )
+
+
+def _as_float(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 0.0
 
 
 async def _handle_user_audio(
